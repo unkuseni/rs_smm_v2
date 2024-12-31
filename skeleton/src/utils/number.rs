@@ -208,12 +208,9 @@ impl Round<f64> for f64 {
             return 0;
         }
 
-        // Format with high precision, but only do it once
         let s = format!("{}", self);
-
-        // Find decimal point and return length after it
         match s.find('.') {
-            Some(pos) => s[pos + 1..].len(),
+            Some(pos) => s[pos + 1..].trim_end_matches('0').len(),
             None => 0,
         }
     }

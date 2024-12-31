@@ -1,6 +1,8 @@
 use teloxide::{prelude::Requester, types::ChatId, Bot, RequestError};
 use tokio::sync::OnceCell;
 
+use super::{config::read_toml, models::Config};
+
 static BOT: OnceCell<Bot> = OnceCell::const_new();
 
 pub struct LiveBot {
@@ -16,12 +18,16 @@ impl LiveBot {
     /// # Errors
     ///
     /// Returns an error if the bot initialization fails.
-    pub fn new(token: String, chat_id: i64) -> Result<Self, RequestError> {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let config = read_toml::<&str, Config>("./config.toml")?;
         if BOT.get().is_none() {
-            let bot = Bot::new(&token);
+            let bot = Bot::new(&config.token);
             _ = BOT.set(bot);
         }
-        Ok(Self { token, chat_id })
+        Ok(Self {
+            token: config.token,
+            chat_id: config.chat_id,
+        })
     }
 
     pub async fn send_message(&self, msg: &str) -> Result<bool, RequestError> {
