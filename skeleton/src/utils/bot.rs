@@ -1,4 +1,4 @@
-use teloxide::{Bot, RequestError};
+use teloxide::{prelude::Requester, types::ChatId, Bot, RequestError};
 use tokio::sync::OnceCell;
 
 static BOT: OnceCell<Bot> = OnceCell::const_new();
@@ -22,5 +22,12 @@ impl LiveBot {
             _ = BOT.set(bot);
         }
         Ok(Self { token, chat_id })
+    }
+
+    pub async fn send_message(&self, msg: &str) -> Result<bool, RequestError> {
+        if let Some(bot) = BOT.get() {
+            bot.send_message(ChatId(self.chat_id), msg).await?;
+        }
+        Ok(true)
     }
 }
