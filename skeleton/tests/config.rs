@@ -1,3 +1,4 @@
+#[cfg(test)]
 mod tests {
     use skeleton::utils::config::{read_toml, watch_config};
     use skeleton::utils::models::Config;

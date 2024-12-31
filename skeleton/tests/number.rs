@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn test_round() {
-        let value = 35.46324566;
+        let value = 35.463245660;
         assert_eq!(value.round_to(3), 35.463);
         assert_eq!(value.clip(0.0, 100.0),  35.46324566);
         assert_eq!(value.count_decimal_places(), 8);
