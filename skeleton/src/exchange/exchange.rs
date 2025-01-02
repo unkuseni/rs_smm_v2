@@ -11,6 +11,7 @@ pub trait Exchange {
     type LeverageOutput;
     type TraderOutput;
     type StreamOutput;
+    type PrivateStreamOutput;
     fn init(api_key: String, api_secret: String) -> Self;
     fn time(&self) -> impl Future<Output = Self::TimeOutput>;
     fn fees(&self, symbol: String) -> impl Future<Output = Self::FeeOutput>;
@@ -24,5 +25,10 @@ pub trait Exchange {
         &self,
         symbols: Vec<String>,
         sender: UnboundedSender<Self::StreamOutput>,
+    ) -> impl Future<Output = ()>;
+    fn private_subscribe(
+        &self,
+        symbol: String,
+        sender: UnboundedSender<Self::PrivateStreamOutput>,
     ) -> impl Future<Output = ()>;
 }

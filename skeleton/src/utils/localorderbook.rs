@@ -14,4 +14,8 @@ pub trait OrderBook {
     fn set_mid_price(&mut self);
     fn get_mid_price(&self) -> f64;
     fn get_depth(&self, depth: usize) -> (Vec<Self::Ask>, Vec<Self::Bid>);
+    fn get_best_ask(&self) -> Self::Ask;
+    fn get_best_bid(&self) -> Self::Bid;
+    fn get_bba(&self) -> (Self::Ask, Self::Bid);
+    fn get_spread(&self) -> f64;
 }
