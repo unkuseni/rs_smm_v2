@@ -1,8 +1,3 @@
-use std::{
-    borrow::Cow,
-    collections::{BTreeMap, VecDeque},
-    time::Duration,
-};
 use bybit::{
     account::AccountManager,
     api::Bybit,
@@ -10,7 +5,8 @@ use bybit::{
     errors::BybitError,
     general::General,
     model::{
-        Ask, Bid, Category, LeverageRequest, OrderBookUpdate, Subscription, Tickers,
+        AmendOrderRequest, Ask, BatchAmendRequest, Bid, CancelOrderRequest, CancelallRequest,
+        Category, LeverageRequest, OrderBookUpdate, OrderStatus, Subscription, Tickers,
         WebsocketEvents,
     },
     position::PositionManager,
@@ -18,12 +14,20 @@ use bybit::{
     ws::Stream,
 };
 use ordered_float::OrderedFloat;
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, VecDeque},
+    time::Duration,
+};
 
 use crate::utils::{
     bot::LiveBot,
     localorderbook::OrderBook,
     logger::Logger,
-    models::{BybitBook, BybitClient, BybitMarket, BybitPrivate},
+    models::{
+        BatchAmend, BatchOrder, BybitBook, BybitClient, BybitMarket, BybitPrivate, IntoReq,
+        LiveOrder,
+    },
 };
 
 use super::exchange::Exchange;
@@ -35,6 +39,12 @@ impl Exchange for BybitClient {
     type TraderOutput = Trader;
     type StreamOutput = BybitMarket;
     type PrivateStreamOutput = (String, BybitPrivate);
+    type PlaceOrderOutput = Result<LiveOrder, BybitError>;
+    type AmendOrderOutput = Result<LiveOrder, BybitError>;
+    type CancelOrderOutput = Result<OrderStatus, BybitError>;
+    type CancelAllOutput = Result<Vec<OrderStatus>, BybitError>;
+    type BatchOrdersOutput = Result<Vec<Vec<LiveOrder>>, BybitError>;
+    type BatchAmendsOutput = Result<Vec<LiveOrder>, BybitError>;
     fn init(api_key: String, api_secret: String) -> Self {
         Self {
             api_key,
@@ -67,7 +77,11 @@ impl Exchange for BybitClient {
             leverage: leverage as i8,
         };
         match account.set_leverage(request_format).await {
-            Ok(_) => Ok(true),
+            Ok(_) => {
+                let success_message = format!("Set leverage for {} to {}", symbol, leverage);
+                let _ = self.bot.send_message(&success_message).await;
+                Ok(true)
+            }
             Err(e) => Err(e),
         }
     }
@@ -80,6 +94,232 @@ impl Exchange for BybitClient {
             Some(self.api_key.clone()),
         );
         trader
+    }
+
+    async fn place_order(
+        &self,
+        symbol: &str,
+        price: f64,
+        qty: f64,
+        is_buy: bool,
+    ) -> Self::PlaceOrderOutput {
+        let trader = self.trader(2500);
+        match trader
+            .place_futures_limit_order(
+                bybit::model::Category::Linear,
+                symbol,
+                if is_buy {
+                    bybit::model::Side::Buy
+                } else {
+                    bybit::model::Side::Sell
+                },
+                qty,
+                price,
+                if is_buy { 1 } else { 2 },
+            )
+            .await
+        {
+            Ok(res) => {
+                let order_message = format!(
+                    "Order placed. Symbol: {}, Price: {}, Quantity: {}, Side: {} Order ID: {}",
+                    symbol,
+                    price,
+                    qty,
+                    if is_buy { "Buy" } else { "Sell" },
+                    res.result.order_id
+                );
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.success(&order_message))
+                    .await;
+                Ok(LiveOrder::new(res.result.order_id, price, qty))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn amend_order(
+        &self,
+        order_id: &str,
+        price: f64,
+        qty: f64,
+        symbol: &str,
+    ) -> Self::AmendOrderOutput {
+        let trader = self.trader(2500);
+        let request = AmendOrderRequest {
+            category: Category::Linear,
+            order_id: Some(Cow::Borrowed(order_id)),
+            symbol: Cow::Borrowed(symbol),
+            qty,
+            price: Some(price),
+            ..Default::default()
+        };
+        match trader.amend_order(request).await {
+            Ok(res) => {
+                let order_message = format!(
+                    "Order amended. Symbol: {}, Order ID: {}, Price: {}, Quantity: {}",
+                    symbol, order_id, price, qty
+                );
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.success(&order_message))
+                    .await;
+                Ok(LiveOrder::new(res.result.order_id, price, qty))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn cancel_order(&self, order_id: &str, symbol: &str) -> Self::CancelOrderOutput {
+        let trader = self.trader(2500);
+        let request = CancelOrderRequest {
+            category: Category::Linear,
+            symbol: Cow::Borrowed(symbol),
+            order_id: Some(Cow::Borrowed(order_id)),
+            order_filter: None,
+            order_link_id: None,
+        };
+        match trader.cancel_order(request).await {
+            Ok(res) => {
+                let order_message = format!(
+                    "Order cancelled. Symbol: {}, Order ID: {}",
+                    symbol, order_id
+                );
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.success(&order_message))
+                    .await;
+                Ok(res.result)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn cancel_all(&self, symbol: &str) -> Self::CancelAllOutput {
+        let trader = self.trader(2500);
+        let request = CancelallRequest {
+            category: Category::Linear,
+            symbol,
+            ..Default::default()
+        };
+        match trader.cancel_all_orders(request).await {
+            Ok(res) => {
+                let order_message = format!("All orders cancelled. Symbol: {}", symbol);
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.success(&order_message))
+                    .await;
+                Ok(res.result.list)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn batch_amends(&self, orders: Vec<BatchAmend>) -> Self::BatchAmendsOutput {
+        let trader = self.trader(2500);
+        let mut amends = Vec::with_capacity(10);
+        let request = orders.clone().into_req();
+        match trader.batch_amend_order(request).await {
+            Ok(res) => {
+                for ((live_order, ext_info), orders) in res
+                    .result
+                    .list
+                    .iter()
+                    .zip(res.ret_ext_info.list.iter())
+                    .zip(orders)
+                {
+                    if ext_info.code == 0 && ext_info.msg == "OK" {
+                        let order_message = format!(
+                            "Order amended. Symbol: {}, Order ID: {}, Price: {}, Quantity: {}",
+                            live_order.symbol, live_order.order_id, orders.1, orders.2
+                        );
+                        amends.push(LiveOrder::new(
+                            live_order.order_id.clone(),
+                            orders.1,
+                            orders.2,
+                        ));
+                        let _ = self
+                            .bot
+                            .send_message(&self.logger.success(&order_message))
+                            .await;
+                    }
+                }
+                Ok(amends)
+            }
+            Err(e) => {
+                let error_message = format!("Order failed. Error: {}", e);
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.error(&error_message))
+                    .await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn batch_orders(&self, orders: Vec<BatchOrder>) -> Self::BatchOrdersOutput {
+        let trader = self.trader(2500);
+        let request = orders.clone().into_req();
+        let mut live_sells = Vec::with_capacity(5);
+        let mut live_buys = Vec::with_capacity(5);
+        match trader.batch_place_order(request).await {
+            Ok(res) => {
+                for ((live_order, ext_info), order_req) in res
+                    .result
+                    .list
+                    .iter()
+                    .zip(res.ret_ext_info.list.iter())
+                    .zip(orders)
+                {
+                    if ext_info.code == 0 && ext_info.msg == "OK" {
+                        let order_message = format!(
+                        "Order placed. Symbol: {}, Price: {}, Quantity: {}, Side: {}, Order ID: {}",
+                        live_order.symbol,
+                        order_req.1,
+                        order_req.2,
+                        if order_req.3 { "Buy" } else { "Sell" },
+                        live_order.order_id
+                    );
+                        if order_req.3 {
+                            live_buys.push(LiveOrder::new(
+                                live_order.order_id.clone(),
+                                order_req.1,
+                                order_req.2,
+                            ));
+                        } else {
+                            live_sells.push(LiveOrder::new(
+                                live_order.order_id.clone(),
+                                order_req.1,
+                                order_req.2,
+                            ));
+                        }
+                        let _ = self
+                            .bot
+                            .send_message(&self.logger.success(&order_message))
+                            .await;
+                    } else {
+                        // Handle failed orders
+                        let error_message = format!(
+                            "Order failed. Symbol: {}, Error: {} (Code: {})",
+                            live_order.symbol, ext_info.msg, ext_info.code
+                        );
+                        let _ = self
+                            .bot
+                            .send_message(&self.logger.error(&error_message))
+                            .await;
+                    }
+                }
+                Ok(vec![live_buys, live_sells])
+            }
+            Err(e) => {
+                let error_message = format!("Order failed. Error: {}", e);
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.error(&error_message))
+                    .await;
+                Err(e)
+            }
+        }
     }
 
     async fn market_subscribe(
@@ -146,7 +386,7 @@ impl Exchange for BybitClient {
                     }
                 }
                 WebsocketEvents::TradeEvent(data) => {
-                    let symbol = data.topic.split(".").nth(2).unwrap();
+                    let symbol = data.topic.split(".").nth(1).unwrap();
                     if let Some(trades) = market_data.trades.get_mut(symbol) {
                         if trades.len() == trades.capacity()
                             || (trades.capacity() - trades.len()) <= data.data.len()
@@ -171,11 +411,12 @@ impl Exchange for BybitClient {
                 .await
             {
                 Ok(_) => {
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    println!("Subscribed to market stream");
                 }
                 Err(e) => {
+                    let error_message = format!("Error: {}", e);
+                    let _ = self.bot.send_message(&error_message).await;
                     tokio::time::sleep(Duration::from_millis(delay)).await;
-                    println!("Error: {}", e);
                 }
             }
         }
@@ -270,7 +511,8 @@ impl Exchange for BybitClient {
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
                 Err(e) => {
-                    eprintln!("Subscription error: {}", e);
+                    let error_message = format!("Error: {}", e);
+                    let _ = self.bot.send_message(&error_message).await;
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
             }
