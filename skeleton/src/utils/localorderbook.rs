@@ -24,6 +24,7 @@ pub trait OrderBook {
     fn get_min_notional(&self) -> f64;
     fn get_post_only_max_qty(&self) -> f64;
     fn min_qty(&self) -> f64;
+    fn get_wmid(&self, depth: Option<usize>) -> f64;
     fn effective_spread(&self, is_buy: bool) -> f64;
     fn get_microprice(&self, depth: Option<usize>) -> f64;
     fn calculate_weighted_ask(&self, depth: usize, decay_rate: Option<f64>) -> f64;

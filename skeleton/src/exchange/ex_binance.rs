@@ -611,6 +611,28 @@ impl OrderBook for BinanceBook {
     fn min_qty(&self) -> f64 {
         self.min_qty
     }
+    fn get_wmid(&self, depth: Option<usize>) -> f64 {
+        let imbalance = {
+            let (weighted_bid_qty, weighted_ask_qty) = if let Some(depth) = depth {
+                // Calculate the weighted bid quantity using the specified depth.
+                (
+                    self.calculate_weighted_bid(depth, Some(0.5)),
+                    self.calculate_weighted_ask(depth, Some(0.5)),
+                )
+            } else {
+                (self.best_bid.qty, self.best_ask.qty)
+            };
+
+            let total_qty = weighted_bid_qty + weighted_ask_qty;
+            weighted_bid_qty / total_qty
+        };
+        if imbalance != 0.0 {
+            (self.best_bid.price * (1.0 - imbalance)) + (self.best_ask.price * imbalance)
+        } else {
+            // Otherwise, return the mid_price of the LocalBook.
+            self.mid_price
+        }
+    }
     fn effective_spread(&self, is_buy: bool) -> f64 {
         if is_buy {
             self.best_bid.price - self.mid_price
