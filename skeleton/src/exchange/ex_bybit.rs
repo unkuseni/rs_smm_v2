@@ -626,8 +626,6 @@ impl OrderBook for BybitBook {
                 .and_modify(|qty| *qty = bid.qty)
                 .or_insert(bid.qty);
         }
-        self.asks.retain(|_, &mut v| v != 0.0);
-        self.bids.retain(|_, &mut v| v != 0.0);
     }
 
     fn update_bba(
@@ -829,7 +827,7 @@ impl OrderBook for BybitBook {
     fn get_spread(&self) -> f64 {
         self.best_ask.price - self.best_bid.price
     }
-        fn get_spread_in_ticks(&self) -> f64 {
+    fn get_spread_in_ticks(&self) -> f64 {
         (self.best_ask.price - self.best_bid.price) / self.tick_size
     }
     fn get_lot_size(&self) -> f64 {

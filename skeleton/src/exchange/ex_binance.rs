@@ -28,7 +28,8 @@ use crate::utils::{
     logger::Logger,
     models::{
         BatchAmend, BatchOrder, BinanceBook, BinanceClient, BinanceMarket, LiveOrder, SymbolInfo,
-    }, number::decay,
+    },
+    number::decay,
 };
 
 use super::exchange::Exchange;
@@ -40,7 +41,7 @@ impl Exchange for BinanceClient {
     type TraderOutput = FuturesAccount;
 
     type StreamData = BinanceMarket;
-    type PrivateStreamData= ();
+    type PrivateStreamData = ();
     type StreamOutput = ();
     type PrivateStreamOutput = ();
     type PlaceOrderOutput = Result<LiveOrder, BinanceError>;
@@ -312,19 +313,22 @@ impl Exchange for BinanceClient {
             let _ = sender.send(market_data.clone());
             Ok(())
         };
-        let mut market: FuturesWebSockets<'_> = FuturesWebSockets::new(handler);
-        loop {
-            market
-                .connect_multiple_streams(&FuturesMarketWs::USDM, &request)
-                .unwrap();
+        let _ = task::spawn_blocking(move || {
+            let mut market: FuturesWebSockets<'_> = FuturesWebSockets::new(handler);
 
-            // check error
-            if let Err(e) = market.event_loop(&keep_streaming) {
-                let error_message = format!("Error: {}", e);
-                let _ = self.bot.send_message(&error_message).await;
-                thread::sleep(Duration::from_millis(delay));
+            loop {
+                market
+                    .connect_multiple_streams(&FuturesMarketWs::USDM, &request)
+                    .unwrap();
+
+                // check error
+                if let Err(e) = market.event_loop(&keep_streaming) {
+                    eprintln!("Error: {}", e);
+                    thread::sleep(Duration::from_millis(delay));
+                }
             }
-        }
+        })
+        .await;
     }
 
     async fn private_subscribe(
