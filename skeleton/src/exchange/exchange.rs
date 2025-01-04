@@ -1,6 +1,8 @@
 use std::future::Future;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::utils::models::{BatchAmend, BatchOrder};
+
 pub trait MarketData {}
 
 pub trait PrivateData {}
