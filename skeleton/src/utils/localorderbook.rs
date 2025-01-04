@@ -18,4 +18,14 @@ pub trait OrderBook {
     fn get_best_bid(&self) -> Self::Bid;
     fn get_bba(&self) -> (Self::Ask, Self::Bid);
     fn get_spread(&self) -> f64;
+    fn get_spread_in_ticks(&self) -> f64;
+    fn get_tick_size(&self) -> f64;
+    fn get_lot_size(&self) -> f64;
+    fn get_min_notional(&self) -> f64;
+    fn get_post_only_max_qty(&self) -> f64;
+    fn min_qty(&self) -> f64;
+    fn effective_spread(&self, is_buy: bool) -> f64;
+    fn get_microprice(&self, depth: Option<usize>) -> f64;
+    fn calculate_weighted_ask(&self, depth: usize, decay_rate: Option<f64>) -> f64;
+    fn calculate_weighted_bid(&self, depth: usize, decay_rate: Option<f64>) -> f64;
 }
