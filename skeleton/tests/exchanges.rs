@@ -8,7 +8,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_bybit_market() {
-        let bot = LiveBot::new().unwrap();
         let api_key: String = String::from("");
         let api_secret: String = String::from("");
         let client = BybitClient::init(api_key, api_secret);
@@ -33,7 +32,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_bybit_private() {
-        let bot = LiveBot::new().unwrap();
         let api_key: String = String::from("");
         let api_secret: String = String::from("");
         let client = BybitClient::init(api_key, api_secret);
@@ -53,7 +51,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_binance_market() {
-        let bot = LiveBot::new().unwrap();
         let api_key: String = String::from("");
         let api_secret: String = String::from("");
         let client = BybitClient::init(api_key, api_secret);
@@ -70,7 +67,7 @@ mod tests {
                 asks.reverse();
                 println!(
                     "Current SOLUSDT price:\nBest Asks: {:#?}\nMid: {:#?}\nBest Bids: {:#?}\n",
-                    asks, event.mid_price, bids
+                    asks, event.get_microprice(Some(4)), bids
                 );
             }
         }
