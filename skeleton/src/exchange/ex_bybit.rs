@@ -28,7 +28,7 @@ use crate::utils::{
     models::{
         BatchAmend, BatchOrder, BybitBook, BybitClient, BybitMarket, BybitPrivate, IntoReq,
         LiveOrder, SymbolInfo,
-    },
+    }, number::decay,
 };
 
 use super::exchange::Exchange;
@@ -38,8 +38,10 @@ impl Exchange for BybitClient {
     type FeeOutput = Result<String, BybitError>;
     type LeverageOutput = Result<bool, BybitError>;
     type TraderOutput = Trader;
-    type StreamOutput = BybitMarket;
-    type PrivateStreamOutput = (String, BybitPrivate);
+    type StreamData = BybitMarket;
+    type PrivateStreamData = (String, BybitPrivate);
+    type StreamOutput = ();
+    type PrivateStreamOutput = ();
     type PlaceOrderOutput = Result<LiveOrder, BybitError>;
     type AmendOrderOutput = Result<LiveOrder, BybitError>;
     type CancelOrderOutput = Result<OrderStatus, BybitError>;
@@ -361,7 +363,7 @@ impl Exchange for BybitClient {
     async fn market_subscribe(
         &self,
         symbols: Vec<String>,
-        sender: tokio::sync::mpsc::UnboundedSender<Self::StreamOutput>,
+        sender: tokio::sync::mpsc::UnboundedSender<Self::StreamData>,
     ) {
         let delay = 600;
         let market_stream: Stream = Bybit::new(None, None);
@@ -482,7 +484,7 @@ impl Exchange for BybitClient {
     async fn private_subscribe(
         &self,
         symbol: String,
-        sender: tokio::sync::mpsc::UnboundedSender<Self::PrivateStreamOutput>,
+        sender: tokio::sync::mpsc::UnboundedSender<Self::PrivateStreamData>,
     ) -> () {
         let delay = 600;
         let user_stream: Stream = Bybit::new(
@@ -826,6 +828,66 @@ impl OrderBook for BybitBook {
 
     fn get_spread(&self) -> f64 {
         self.best_ask.price - self.best_bid.price
+    }
+        fn get_spread_in_ticks(&self) -> f64 {
+        (self.best_ask.price - self.best_bid.price) / self.tick_size
+    }
+    fn get_lot_size(&self) -> f64 {
+        self.lot_size
+    }
+    fn get_min_notional(&self) -> f64 {
+        self.min_notional
+    }
+    fn get_post_only_max_qty(&self) -> f64 {
+        self.post_only_max
+    }
+    fn get_tick_size(&self) -> f64 {
+        self.tick_size
+    }
+    fn min_qty(&self) -> f64 {
+        self.min_qty
+    }
+    fn effective_spread(&self, is_buy: bool) -> f64 {
+        if is_buy {
+            self.best_bid.price - self.mid_price
+        } else {
+            self.mid_price - self.best_ask.price
+        }
+    }
+    fn get_microprice(&self, depth: Option<usize>) -> f64 {
+        let (bid_qty, ask_qty) = match depth {
+            Some(depth) => (
+                self.calculate_weighted_bid(depth, Some(0.5)),
+                self.calculate_weighted_ask(depth, Some(0.5)),
+            ),
+            None => (self.best_bid.qty, self.best_ask.qty),
+        };
+
+        let total_qty = bid_qty + ask_qty;
+        if total_qty == 0.0 {
+            return self.mid_price;
+        }
+
+        let qty_ratio = bid_qty / total_qty;
+        (self.best_ask.price * qty_ratio) + (self.best_bid.price * (1.0 - qty_ratio))
+    }
+    fn calculate_weighted_ask(&self, depth: usize, decay_rate: Option<f64>) -> f64 {
+        self.asks
+            .iter()
+            .take(depth)
+            .enumerate()
+            .map(|(i, (_, qty))| (decay(i as f64, decay_rate) * qty) as f64)
+            .sum::<f64>()
+    }
+
+    fn calculate_weighted_bid(&self, depth: usize, decay_rate: Option<f64>) -> f64 {
+        self.bids
+            .iter()
+            .rev()
+            .take(depth)
+            .enumerate()
+            .map(|(i, (_, qty))| (decay(i as f64, decay_rate) * qty) as f64)
+            .sum::<f64>()
     }
 }
 
