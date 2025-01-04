@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+binance = "0.21.0"
 notify = "7.0.0"
+num-traits = "0.2.19"
+ordered-float = "4.6.0"
+rs_bybit = "0.3.2"
 serde = { version = "1.0.217", features = ['derive'] }
+teloxide = "0.13.0"
 tokio = { version = "1.42.0", features = ["full"] }
 toml = "0.8.19"

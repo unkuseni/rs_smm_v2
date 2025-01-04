@@ -1,0 +1,10 @@
+[package]
+name = "rs_smm_v2"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = ["skeleton"]
+
+[dependencies]
+skeleton = { path = "./skeleton" }
