@@ -9,10 +9,12 @@ use std::{
 use binance::{
     api::Binance,
     config::Config,
+    errors::Error as BinanceError,
     futures::{
         account::FuturesAccount,
         general::FuturesGeneral,
         market::FuturesMarket,
+        model::{CanceledOrder, Filters::PriceFilter},
         websockets::{FuturesMarket as FuturesMarketWs, FuturesWebSockets, FuturesWebsocketEvent},
     },
     model::{Asks, Bids, DepthOrderBookEvent},
@@ -24,7 +26,9 @@ use crate::utils::{
     bot::LiveBot,
     localorderbook::OrderBook,
     logger::Logger,
-    models::{BinanceBook, BinanceClient, BinanceMarket},
+    models::{
+        BatchAmend, BatchOrder, BinanceBook, BinanceClient, BinanceMarket, LiveOrder, SymbolInfo,
+    },
 };
 
 use super::exchange::Exchange;
@@ -36,6 +40,13 @@ impl Exchange for BinanceClient {
     type TraderOutput = FuturesAccount;
     type StreamOutput = BinanceMarket;
     type PrivateStreamOutput = ();
+    type PlaceOrderOutput = Result<LiveOrder, BinanceError>;
+    type AmendOrderOutput = ();
+    type CancelOrderOutput = Result<CanceledOrder, BinanceError>;
+    type CancelAllOutput = Result<(), BinanceError>;
+    type BatchOrdersOutput = ();
+    type SymbolInformationOutput = Result<SymbolInfo, BinanceError>;
+    type BatchAmendsOutput = ();
 
     fn init(api_key: String, api_secret: String) -> Self {
         Self {
@@ -100,6 +111,133 @@ impl Exchange for BinanceClient {
         trader
     }
 
+    async fn place_order(
+        &self,
+        symbol: &str,
+        price: f64,
+        qty: f64,
+        is_buy: bool,
+    ) -> Self::PlaceOrderOutput {
+        let trader = self.trader(2500);
+        let new_symbol = symbol.to_string();
+        let order = task::spawn_blocking(move || {
+            if is_buy {
+                match trader.limit_buy(
+                    new_symbol,
+                    qty,
+                    price,
+                    binance::futures::account::TimeInForce::GTC,
+                ) {
+                    Ok(res) => Ok(LiveOrder::new(
+                        res.order_id.to_string(),
+                        res.avg_price,
+                        res.orig_qty,
+                    )),
+                    Err(e) => Err(e),
+                }
+            } else {
+                match trader.limit_sell(
+                    new_symbol,
+                    qty,
+                    price,
+                    binance::futures::account::TimeInForce::GTC,
+                ) {
+                    Ok(res) => Ok(LiveOrder::new(
+                        res.order_id.to_string(),
+                        res.avg_price,
+                        res.orig_qty,
+                    )),
+                    Err(e) => Err(e),
+                }
+            }
+        })
+        .await
+        .unwrap();
+        order
+    }
+    async fn amend_order(
+        &self,
+        order_id: &str,
+        price: f64,
+        qty: f64,
+        symbol: &str,
+    ) -> Self::AmendOrderOutput {
+        unimplemented!();
+    }
+    async fn cancel_order(&self, order_id: &str, symbol: &str) -> Self::CancelOrderOutput {
+        let trader = self.trader(2500);
+        let (new_id, new_symbol) = (order_id.parse::<u64>().unwrap(), symbol.to_string());
+        let cancel = task::spawn_blocking(move || match trader.cancel_order(new_symbol, new_id) {
+            Ok(res) => Ok(res),
+            Err(e) => Err(e),
+        })
+        .await
+        .unwrap();
+        cancel
+    }
+    async fn cancel_all(&self, symbol: &str) -> Self::CancelAllOutput {
+        let trader = self.trader(2500);
+        let new_symbol = symbol.to_string();
+        let cancel =
+            task::spawn_blocking(move || match trader.cancel_all_open_orders(new_symbol) {
+                Ok(res) => Ok(res),
+                Err(e) => Err(e),
+            })
+            .await
+            .unwrap();
+        cancel
+    }
+    async fn batch_orders(&self, orders: Vec<BatchOrder>) -> Self::BatchOrdersOutput {}
+    async fn batch_amends(&self, orders: Vec<BatchAmend>) -> Self::BatchAmendsOutput {}
+
+    async fn get_symbol_info(&self, symbol: &str) -> Self::SymbolInformationOutput {
+        let market_data: FuturesGeneral = Binance::new(None, None);
+        let new_symbol = symbol.to_string();
+        let info = task::spawn_blocking(move || match market_data.get_symbol_info(new_symbol) {
+            Ok(res) => {
+                let price_filter = match &res.filters[0] {
+                    PriceFilter { tick_size, .. } => tick_size.parse().unwrap_or(0.0),
+                    _ => 0.0,
+                };
+                let final_data = SymbolInfo {
+                    tick_size: price_filter,
+                    lot_size: match &res.filters[1] {
+                        binance::model::Filters::LotSize { step_size, .. } => {
+                            step_size.parse().unwrap_or(0.0)
+                        }
+                        _ => 0.0,
+                    },
+                    min_notional: match &res.filters[5] {
+                        binance::model::Filters::MinNotional { notional, .. } => {
+                            notional.clone().unwrap().parse().unwrap_or(0.0)
+                        }
+                        _ => 0.0,
+                    },
+                    min_qty: 0.0,
+                    post_only_max: match &res.filters[1] {
+                        binance::model::Filters::LotSize { max_qty, .. } => {
+                            max_qty.parse().unwrap_or(0.0)
+                        }
+                        _ => 0.0,
+                    },
+                };
+                Ok(final_data)
+            }
+            Err(e) => Err(e),
+        })
+        .await;
+        match info {
+            Ok(res) => Ok(res?),
+            Err(e) => {
+                let error_message = format!("Order failed. Error: {}", e);
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.error(&error_message))
+                    .await;
+                panic!("Order failed. Error: {}", e)
+            }
+        }
+    }
     async fn market_subscribe(
         &self,
         symbols: Vec<String>,
@@ -179,7 +317,8 @@ impl Exchange for BinanceClient {
 
             // check error
             if let Err(e) = market.event_loop(&keep_streaming) {
-                eprintln!("Error: {}", e);
+                let error_message = format!("Error: {}", e);
+                let _ = self.bot.send_message(&error_message).await;
                 thread::sleep(Duration::from_millis(delay));
             }
         }
@@ -216,6 +355,11 @@ impl OrderBook for BinanceBook {
             },
 
             mid_price: 0.0,
+            tick_size: 0.0,
+            lot_size: 0.0,
+            min_notional: 0.0,
+            min_qty: 0.0,
+            post_only_max: 0.0,
         }
     }
 

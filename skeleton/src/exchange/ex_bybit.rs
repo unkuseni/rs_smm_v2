@@ -4,9 +4,10 @@ use bybit::{
     config::Config,
     errors::BybitError,
     general::General,
+    market::MarketData,
     model::{
-        AmendOrderRequest, Ask, BatchAmendRequest, Bid, CancelOrderRequest, CancelallRequest,
-        Category, LeverageRequest, OrderBookUpdate, OrderStatus, Subscription, Tickers,
+        AmendOrderRequest, Ask, Bid, CancelOrderRequest, CancelallRequest, Category,
+        InstrumentRequest, LeverageRequest, OrderBookUpdate, OrderStatus, Subscription, Tickers,
         WebsocketEvents,
     },
     position::PositionManager,
@@ -26,7 +27,7 @@ use crate::utils::{
     logger::Logger,
     models::{
         BatchAmend, BatchOrder, BybitBook, BybitClient, BybitMarket, BybitPrivate, IntoReq,
-        LiveOrder,
+        LiveOrder, SymbolInfo,
     },
 };
 
@@ -45,6 +46,7 @@ impl Exchange for BybitClient {
     type CancelAllOutput = Result<Vec<OrderStatus>, BybitError>;
     type BatchOrdersOutput = Result<Vec<Vec<LiveOrder>>, BybitError>;
     type BatchAmendsOutput = Result<Vec<LiveOrder>, BybitError>;
+    type SymbolInformationOutput = Result<SymbolInfo, BybitError>;
     fn init(api_key: String, api_secret: String) -> Self {
         Self {
             api_key,
@@ -322,6 +324,40 @@ impl Exchange for BybitClient {
         }
     }
 
+    async fn get_symbol_info(&self, symbol: &str) -> Self::SymbolInformationOutput {
+        let market_data: MarketData = Bybit::new(None, None);
+        let request = InstrumentRequest::new(Category::Linear, Some(symbol), None, None, None);
+        match market_data.get_futures_instrument_info(request).await {
+            Ok(res) => {
+                let data = SymbolInfo {
+                    tick_size: res.result.list[0].price_filter.tick_size,
+                    lot_size: if let Some(v) = &res.result.list[0].lot_size_filter.qty_step {
+                        v.parse::<f64>().unwrap_or(0.0)
+                    } else {
+                        0.0
+                    },
+                    min_notional: if let Some(v) =
+                        &res.result.list[0].lot_size_filter.min_notional_value
+                    {
+                        v.parse::<f64>().unwrap_or(0.0)
+                    } else {
+                        0.0
+                    },
+                    post_only_max: res.result.list[0].lot_size_filter.max_order_qty,
+                    min_qty: res.result.list[0].lot_size_filter.min_order_qty,
+                };
+                Ok(data)
+            }
+            Err(e) => {
+                let error_message = format!("Order failed. Error: {}", e);
+                let _ = self
+                    .bot
+                    .send_message(&self.logger.error(&error_message))
+                    .await;
+                Err(e)
+            }
+        }
+    }
     async fn market_subscribe(
         &self,
         symbols: Vec<String>,
@@ -334,12 +370,33 @@ impl Exchange for BybitClient {
         let mut market_data = BybitMarket::default();
         let request = Subscription::new("subscribe", args.iter().map(String::as_str).collect());
 
-        for k in symbols {
+        for k in symbols.clone() {
             market_data.books.insert(k.clone(), BybitBook::new());
             market_data
                 .trades
                 .insert(k.clone(), VecDeque::with_capacity(5000));
             market_data.ticker.insert(k, VecDeque::with_capacity(10));
+        }
+        for k in symbols {
+            if let Some(book) = market_data.books.get_mut(&k) {
+                match self.get_symbol_info(&k).await {
+                    Ok(res) => {
+                        book.tick_size = res.tick_size;
+                        book.lot_size = res.lot_size;
+                        book.min_notional = res.min_notional;
+                        book.post_only_max = res.post_only_max;
+                        book.min_qty = res.min_qty;
+                    }
+                    Err(e) => {
+                        let error_message = format!("Order failed. Error: {}", e);
+                        let _ = self
+                            .bot
+                            .send_message(&self.logger.error(&error_message))
+                            .await;
+                    }
+                }
+                
+            }
         }
         let handler = move |event| {
             match event {
@@ -540,6 +597,11 @@ impl OrderBook for BybitBook {
                 qty: 0.0,
             },
             mid_price: 0.0,
+            tick_size: 0.0,
+            lot_size: 0.0,
+            min_notional: 0.0,
+            min_qty: 0.0,
+            post_only_max: 0.0,
         }
     }
 
