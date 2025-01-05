@@ -13,22 +13,23 @@ mod tests {
         let (sender, mut receiver) = mpsc::unbounded_channel();
         let stream = tokio::spawn(async move {
             client
-                .market_subscribe(vec!["SOLUSDT".to_string()], sender)
+                .market_subscribe(vec!["ETHUSDT".to_string()], sender)
                 .await;
         });
-
         while let Some(data) = receiver.recv().await {
-            if let Some(event) = data.books.get("SOLUSDT") {
+            if let Some(event) = data.books.get("ETHUSDT") {
                 let (mut asks, bids) = event.get_depth(4);
                 asks.reverse();
-                println!(
-                    "Current SOLUSDT price:\nBest Asks: {:#?}\nMicroprice: {:#?}   WMID: {:#?}  Trend: {:#?}\nBest Bids: {:#?}\n",
-                    asks,
-                    event.get_microprice(Some(4)),
-                    event.get_wmid(Some(4)),
-                    if (event.best_ask.price - event.get_microprice(Some(4))) < (event.get_microprice(Some(4)) - event.best_bid.price) { "Up" } else { "Down" },
-                    bids
-                );
+                if let Some(new_trades) = data.trades.get("ETHUSDT") {
+                    println!(
+                        "Current ETHUSDT price:\nBest Asks: {:#?}\nWMID: {:#?}  Trade: {:#?}  Trend: {:#?}\nBest Bids: {:#?}\n",
+                        asks,
+                        event.get_wmid(Some(4)),
+                        new_trades.len(),
+                        if (event.get_microprice(Some(4)) - event.best_bid.price) > (event.best_ask.price - event.get_microprice(Some(4))) {"up"} else {"down"},
+                        bids
+                    );
+                }
             }
         }
     }
@@ -47,17 +48,17 @@ mod tests {
         });
 
         while let Some(data) = receiver.recv().await {
-            if let Some(event) = data.books.get("SOLUSDT") {
-                let (mut asks, bids) = event.get_depth(4);
-                asks.reverse();
-                println!(
-                    "Current SOLUSDT price:\nBest Asks: {:#?}\nMicroprice: {:#?}   WMID: {:#?}  Trend: {:#?}\nBest Bids: {:#?}\n",
-                    asks,
-                    event.get_microprice(Some(4)),
-                    event.get_wmid(Some(4)),
-                    if (event.best_ask.price - event.get_microprice(Some(4))) < (event.get_microprice(Some(4)) - event.best_bid.price) { "Up" } else { "Down" },
-                    bids
-                );
+            if let Some(event) = data.trades.get("SOLUSDT") {
+                let mut delta = 0.0;
+                for trade in event {
+                    if trade.is_buyer_maker == true {
+                        delta -= trade.qty.parse::<f64>().unwrap();
+                    } else {
+                        delta += trade.qty.parse::<f64>().unwrap();
+                    }
+                }
+
+                println!("Current SOLUSDT price:\n{:#?}\n", delta);
             }
         }
     }
