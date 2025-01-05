@@ -27,6 +27,10 @@ pub trait OrderBook {
     fn get_wmid(&self, depth: Option<usize>) -> f64;
     fn effective_spread(&self, is_buy: bool) -> f64;
     fn get_microprice(&self, depth: Option<usize>) -> f64;
+    fn imbalance_ratio(&self, depth: Option<usize>) -> f64;
+    fn price_impact(&self, old_book: &Self, depth: Option<usize>) -> f64;
+    fn ofi(&self, old_book: &Self, depth: Option<usize>) -> f64;
+    fn voi(&self, old_book: &Self, depth: Option<usize>) -> f64;
     fn calculate_weighted_ask(&self, depth: usize, decay_rate: Option<f64>) -> f64;
     fn calculate_weighted_bid(&self, depth: usize, decay_rate: Option<f64>) -> f64;
 }

@@ -891,6 +891,200 @@ impl OrderBook for BybitBook {
         let qty_ratio = bid_qty / total_qty;
         (self.best_ask.price * qty_ratio) + (self.best_bid.price * (1.0 - qty_ratio))
     }
+
+    fn price_impact(&self, old_book: &Self, depth: Option<usize>) -> f64 {
+        // Calculate the volume at the bid and ask offsets
+        let (mut old_bid_vol, mut curr_bid_vol, old_bid_price, curr_bid_price) = (
+            old_book.best_bid.qty,
+            self.best_bid.qty,
+            old_book.best_bid.price,
+            self.best_bid.price,
+        );
+        let (mut old_ask_vol, mut curr_ask_vol, old_ask_price, curr_ask_price) = (
+            old_book.best_ask.qty,
+            self.best_ask.qty,
+            old_book.best_ask.price,
+            self.best_ask.price,
+        );
+
+        // Calculate the volume at the depth, if provided
+        if let Some(depth) = depth {
+            old_bid_vol = 0.0;
+            curr_bid_vol = 0.0;
+            old_ask_vol = 0.0;
+            curr_ask_vol = 0.0;
+
+            // Iterate over the depth asks and bids in the old and new order books
+            for (_, (_, qty)) in old_book.asks.iter().take(depth).enumerate() {
+                old_ask_vol += qty;
+            }
+            for (_, (_, qty)) in self.asks.iter().take(depth).enumerate() {
+                curr_ask_vol += qty;
+            }
+            for (_, (_, qty)) in old_book.bids.iter().rev().take(depth).enumerate() {
+                old_bid_vol += qty;
+            }
+            for (_, (_, qty)) in self.bids.iter().rev().take(depth).enumerate() {
+                curr_bid_vol += qty;
+            }
+        }
+
+        // Calculate the volume at the bid and ask offsets
+        let bid_impact = if curr_bid_price > old_bid_price || curr_bid_vol > old_bid_vol {
+            curr_bid_vol - old_bid_vol
+        } else if curr_bid_price < old_bid_price || curr_bid_vol < old_bid_vol {
+            curr_bid_vol - old_bid_vol
+        } else {
+            0.0
+        };
+        let ask_impact = if curr_ask_price < old_ask_price || curr_ask_vol > old_ask_vol {
+            curr_ask_vol - old_ask_vol
+        } else if curr_ask_price > old_ask_price || curr_ask_vol < old_ask_vol {
+            curr_ask_vol - old_ask_vol
+        } else {
+            0.0
+        };
+
+        // Return the sum of the bid and ask impacts
+        bid_impact + ask_impact
+    }
+
+    fn imbalance_ratio(&self, depth: Option<usize>) -> f64 {
+        // Initialize the weighted bid and ask quantities to the quantities of the best bid and ask.
+        let (weighted_bid_qty, weighted_ask_qty) = if let Some(depth) = depth {
+            // Calculate the weighted bid quantity using the specified depth.
+            (
+                self.calculate_weighted_bid(depth, Some(0.5)),
+                self.calculate_weighted_ask(depth, Some(0.5)),
+            )
+        } else {
+            (self.best_bid.qty, self.best_ask.qty)
+        };
+
+        // Calculate the difference between the weighted bid and ask quantities.
+        let diff = weighted_bid_qty - weighted_ask_qty;
+        // Calculate the sum of the weighted bid and ask quantities.
+        let sum = weighted_bid_qty + weighted_ask_qty;
+        // Calculate the imbalance ratio by dividing the difference by the sum.
+        let ratio = diff / sum;
+
+        // Return the imbalance ratio, checking for NaN and out-of-range values.
+        match ratio {
+            x if x.is_nan() => 0.0, // If NaN, return 0.
+            x if x > 0.20 => x,     // If positive and greater than 0.20, return the ratio.
+            x if x < -0.20 => x,    // If negative and less than -0.20, return the ratio.
+            _ => 0.0,               // Otherwise, return 0.
+        }
+    }
+
+    fn ofi(&self, old_book: &Self, depth: Option<usize>) -> f64 {
+        let bid_ofi = {
+            if self.best_bid.price > old_book.best_bid.price {
+                if let Some(depth) = depth {
+                    let weighted_bid = self.calculate_weighted_bid(depth, Some(0.5));
+                    weighted_bid
+                } else {
+                    self.best_bid.qty
+                }
+            } else if self.best_bid.price == old_book.best_bid.price {
+                if let Some(depth) = depth {
+                    let weighted_bid = self.calculate_weighted_bid(depth, Some(0.5));
+                    let prev_weighted_bid = old_book.calculate_weighted_bid(depth, Some(0.5));
+                    weighted_bid - prev_weighted_bid
+                } else {
+                    self.best_bid.qty - old_book.best_bid.qty
+                }
+            } else {
+                if let Some(depth) = depth {
+                    let weighted_bid = self.calculate_weighted_bid(depth, Some(0.5));
+                    -weighted_bid
+                } else {
+                    -self.best_bid.qty
+                }
+            }
+        };
+        let ask_ofi = {
+            if self.best_ask.price < old_book.best_ask.price {
+                if let Some(depth) = depth {
+                    let weighted_ask = self.calculate_weighted_ask(depth, Some(0.5));
+                    -weighted_ask
+                } else {
+                    -self.best_ask.qty
+                }
+            } else if self.best_ask.price == old_book.best_ask.price {
+                if let Some(depth) = depth {
+                    let weighted_ask = self.calculate_weighted_ask(depth, Some(0.5));
+                    let prev_weighted_ask = old_book.calculate_weighted_ask(depth, Some(0.5));
+                    prev_weighted_ask - weighted_ask
+                } else {
+                    old_book.best_ask.qty - self.best_ask.qty
+                }
+            } else {
+                if let Some(depth) = depth {
+                    let weighted_ask = self.calculate_weighted_ask(depth, Some(0.5));
+                    weighted_ask
+                } else {
+                    self.best_ask.qty
+                }
+            }
+        };
+        let ofi = ask_ofi + bid_ofi;
+
+        ofi
+    }
+
+    fn voi(&self, old_book: &Self, depth: Option<usize>) -> f64 {
+        // Calculate the volume at the bid side
+        let bid_v = match self.best_bid.price {
+            x if x < old_book.best_bid.price => 0.0,
+            x if x == old_book.best_bid.price => {
+                if let Some(depth) = depth {
+                    let curr_bid_qty = self.calculate_weighted_bid(depth, Some(0.5));
+                    let prev_bid_qty = old_book.calculate_weighted_bid(depth, Some(0.5));
+                    curr_bid_qty - prev_bid_qty
+                } else {
+                    self.best_bid.qty - old_book.best_bid.qty
+                }
+            }
+            x if x > old_book.best_bid.price => {
+                if let Some(depth) = depth {
+                    let curr_bid = self.calculate_weighted_bid(depth, Some(0.5));
+                    curr_bid
+                } else {
+                    self.best_bid.qty
+                }
+            }
+            _ => 0.0,
+        };
+
+        // Calculate the volume at the ask side
+        let ask_v = match self.best_ask.price {
+            x if x < old_book.best_ask.price => {
+                if let Some(depth) = depth {
+                    let curr_ask = self.calculate_weighted_ask(depth, Some(0.5));
+                    curr_ask
+                } else {
+                    self.best_ask.qty
+                }
+            }
+            x if x == old_book.best_ask.price => {
+                if let Some(depth) = depth {
+                    let curr_ask_qty = self.calculate_weighted_ask(depth, Some(0.5));
+                    let prev_ask_qty = old_book.calculate_weighted_ask(depth, Some(0.5));
+                    curr_ask_qty - prev_ask_qty
+                } else {
+                    self.best_ask.qty - old_book.best_ask.qty
+                }
+            }
+            x if x > old_book.best_ask.price => 0.0,
+            _ => 0.0,
+        };
+
+        // Calculate the volume at the offset
+        let diff = bid_v - ask_v;
+        diff
+    }
+
     fn calculate_weighted_ask(&self, depth: usize, decay_rate: Option<f64>) -> f64 {
         self.asks
             .iter()
