@@ -5,11 +5,15 @@ use std::fmt;
 pub struct Logger;
 
 impl Logger {
-    pub fn log(level: LogLevel, msg: &str) -> String {
+    fn get_formatted_datetime() -> (String, u64, u64, u64, u64, &'static str) {
         let (month, day, _) = get_formatted_date();
         let (hours, mins, secs, is_pm) = get_formatted_time();
         let am_pm = if is_pm { "PM" } else { "AM" };
+        (month, day, hours, mins, secs, am_pm)
+    }
 
+    pub fn log(level: LogLevel, msg: &str) -> String {
+        let (month, day, hours, mins, secs, am_pm) = Self::get_formatted_datetime();
         let formatted_msg = format!(
             "{} {}, {:02}:{:02}:{:02} {} | {:<8} | {}",
             day, month, hours, mins, secs, am_pm, level, msg

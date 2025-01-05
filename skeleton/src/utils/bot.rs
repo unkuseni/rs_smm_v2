@@ -4,6 +4,11 @@ use tokio::sync::OnceCell;
 use super::{config::read_toml, models::Config};
 
 static BOT: OnceCell<Bot> = OnceCell::const_new();
+static CONFIG: OnceCell<Config> = OnceCell::const_new();
+
+pub fn init_config() -> Result<&'static Config, Box<dyn std::error::Error>> {
+    CONFIG.get_or_try_init(|| read_toml::<&str, Config>("./config.toml"))
+}
 
 #[derive(Debug, Clone)]
 pub struct LiveBot {
@@ -20,13 +25,13 @@ impl LiveBot {
     ///
     /// Returns an error if the bot initialization fails.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let config = read_toml::<&str, Config>("./config.toml")?;
+        let config = init_config()?;
         if BOT.get().is_none() {
             let bot = Bot::new(&config.token);
             _ = BOT.set(bot);
         }
         Ok(Self {
-            token: config.token,
+            token: config.token.clone(),
             chat_id: config.chat_id,
         })
     }
