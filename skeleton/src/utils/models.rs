@@ -28,14 +28,14 @@ impl PartialEq for Config {
         self.token != other.token && self.chat_id != other.chat_id
     }
 }
-
+#[derive(Clone, Debug)]
 pub struct BybitClient {
     pub api_key: String,
     pub api_secret: String,
     pub logger: Logger,
     pub bot: LiveBot,
 }
-
+#[derive(Clone, Debug)]
 pub struct BinanceClient {
     pub api_key: String,
     pub api_secret: String,

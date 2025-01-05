@@ -14,7 +14,7 @@ mod tests {
         let api_secret: String = String::from("");
         let client = BybitClient::init(api_key, api_secret);
         let (sender, mut receiver) = mpsc::unbounded_channel();
-        let stream = tokio::spawn(async move {
+        tokio::spawn(async move {
             client
                 .market_subscribe(vec!["ETHUSDT".to_string()], sender)
                 .await;
@@ -44,7 +44,7 @@ mod tests {
         let client = BinanceClient::init(api_key, api_secret);
         let (sender, mut receiver) = mpsc::unbounded_channel::<BinanceMarket>();
         let sender_clone = sender.clone();
-        let stream = tokio::spawn(async move {
+        tokio::spawn(async move {
             client
                 .market_subscribe(vec!["SOLUSDT".to_string()], sender_clone)
                 .await;
@@ -72,7 +72,7 @@ mod tests {
         let api_secret: String = String::from("");
         let client = BybitClient::init(api_key, api_secret);
         let (sender, mut receiver) = mpsc::unbounded_channel();
-        let stream = tokio::spawn(async move {
+        tokio::spawn(async move {
             client
                 .private_subscribe("SOLUSDT".to_string(), sender)
                 .await;
@@ -93,7 +93,7 @@ mod tests {
             BybitClient::init("".to_string(), "".to_string()),
         );
         let (sender, mut receiver) = mpsc::unbounded_channel();
-        let stream = tokio::spawn(async move {
+        tokio::spawn(async move {
             ss.load_data(sender).await;
         });
         let instant = std::time::Instant::now();
