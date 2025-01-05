@@ -8,7 +8,7 @@ pub fn generate_timestamp() -> Result<u64, SystemTimeError> {
 
 #[inline(always)]
 pub fn get_formatted_time() -> (u64, u64, u64, bool) {
-    let timestamp = generate_timestamp().unwrap() / 1000; // Convert ms to seconds
+    let timestamp = generate_timestamp().unwrap() / 1000; // Convert to seconds
     let total_seconds = timestamp % 86400; // Seconds in current day (86400 = 24*60*60)
 
     // Extract hours, minutes, seconds
@@ -31,7 +31,7 @@ pub fn get_formatted_time() -> (u64, u64, u64, bool) {
 
 #[inline(always)]
 pub fn get_formatted_date() -> (String, u64, u64) {
-    let timestamp = generate_timestamp().unwrap() / 1000; // Convert ms to seconds
+    let timestamp = generate_timestamp().unwrap() / 1000; // Convert to seconds
     let days_since_epoch = timestamp / 86400;
     let month_str = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",

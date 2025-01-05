@@ -49,14 +49,18 @@ pub fn geometric_weights(ratio: f64, n: usize, reverse: bool) -> Vec<f64> {
         ratio >= 0.0 && ratio <= 1.0,
         "Ratio must be between 0 and 1"
     );
+    if ratio == 1.0 {
+        return vec![1.0 / n as f64; n];
+    }
+    let sum = (1.0 - ratio.powi(n as i32)) / (1.0 - ratio);
     let weights: Vec<f64> = if reverse {
-        (0..n).map(|i| ratio.powi((n - 1 - i) as i32)).collect()
+        (0..n)
+            .map(|i| ratio.powi((n - 1 - i) as i32) / sum)
+            .collect()
     } else {
-        (0..n).map(|i| ratio.powi(i as i32)).collect()
+        (0..n).map(|i| ratio.powi(i as i32) / sum).collect()
     };
-
-    let sum: f64 = weights.iter().sum();
-    weights.into_iter().map(|w| w / sum).collect()
+    weights
 }
 
 /// Generates a vector of `n` evenly spaced values over a range from
@@ -77,26 +81,11 @@ pub fn linspace<T: Float + NumCast>(start: T, end: T, n: usize) -> Vec<T> {
     );
 
     let mut result = Vec::with_capacity(n);
-
-    // Handle special case for n = 2
-    if n == 2 {
-        return vec![start, end];
-    }
-
-    // Pre-calculate constants
-    let n_minus_1 = T::from(n - 1).unwrap();
-
-    // Use linear interpolation for better numerical stability
+    let step = (end - start) / T::from(n - 1).unwrap();
     for i in 0..n {
-        let t = T::from(i).unwrap() / n_minus_1;
-        result.push(start + (end - start) * t);
+        result.push(start + step * T::from(i).unwrap());
     }
-
-    // Ensure exact endpoints
-    if let Some(last) = result.last_mut() {
-        *last = end;
-    }
-
+    result[n - 1] = end; // Ensure exact endpoint
     result
 }
 
