@@ -5,6 +5,7 @@ use super::{config::read_toml, models::Config};
 
 static BOT: OnceCell<Bot> = OnceCell::const_new();
 
+#[derive(Debug, Clone)]
 pub struct LiveBot {
     pub token: String,
     pub chat_id: i64,

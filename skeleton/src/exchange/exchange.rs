@@ -1,11 +1,8 @@
 use std::future::Future;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::utils::models::{BatchAmend, BatchOrder};
+use crate::utils::models::{BatchAmend, BatchOrder, BinanceMarket, BybitMarket};
 
-pub trait MarketData {}
-
-pub trait PrivateData {}
 
 pub trait Exchange {
     type TimeOutput;
@@ -66,10 +63,16 @@ pub trait Exchange {
         &self,
         symbols: Vec<String>,
         sender: UnboundedSender<Self::StreamData>,
-    ) ->impl Future<Output = Self::StreamOutput>;
+    ) -> impl Future<Output = Self::StreamOutput>;
     fn private_subscribe(
         &self,
         symbol: String,
         sender: UnboundedSender<Self::PrivateStreamData>,
     ) -> impl Future<Output = Self::PrivateStreamOutput>;
+}
+
+#[derive(Debug, Clone)]
+pub enum MarketData {
+    Bybit(BybitMarket),
+    Binance(BinanceMarket),
 }
