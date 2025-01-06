@@ -71,3 +71,8 @@ pub fn expected_return(old_price: f64, curr_price: f64) -> f64 {
 pub fn expected_return_bps(old_price: f64, curr_price: f64) -> f64 {
     (curr_price / old_price).ln() * 10000.0
 }
+
+#[inline(always)]
+pub fn rate_of_change(old_price: f64, curr_price: f64) -> f64 {
+    ((curr_price - old_price) / old_price) * 100.0
+}
