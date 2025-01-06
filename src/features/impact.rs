@@ -50,5 +50,24 @@ pub fn mid_price_avg(old_mid: f64, curr_mid: f64) -> f64 {
     (old_mid + curr_mid) * 0.5
 }
 
+/// Calculates the expected return in percent, given the old and current prices.
+///
+/// The formula used is as follows: ER = ln(old_price / curr_price) * 100
+///
+/// # Arguments
+///
+/// * `old_price` - The old price.
+/// * `curr_price` - The current price.
+///
+/// # Returns
+///
+/// The expected return in percent.
+#[inline(always)]
+pub fn expected_return(old_price: f64, curr_price: f64) -> f64 {
+    (curr_price / old_price).ln() * 100.0
+}
 
-
+#[inline(always)]
+pub fn expected_return_bps(old_price: f64, curr_price: f64) -> f64 {
+    (curr_price / old_price).ln() * 10000.0
+}
