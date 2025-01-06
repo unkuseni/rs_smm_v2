@@ -5,6 +5,12 @@ use tokio::sync::mpsc;
 
 use toml;
 
+    /// Reads a configuration from a TOML file.
+    ///
+    /// # Errors
+    ///
+    /// If the file does not exist or cannot be read, or if the TOML is
+    /// invalid, an error is returned.
 pub fn read_toml<T, U>(path: T) -> Result<U, Box<dyn Error>>
 where
     T: AsRef<Path>,
@@ -15,6 +21,26 @@ where
     Ok(config)
 }
 
+    /// Watches a configuration file for changes and sends the updated
+    /// configuration over the given channel.
+    ///
+    /// This function will first read the configuration from the given file
+    /// and send it over the channel. It will then start watching the file
+    /// for changes. When a change is detected, it will read the file again
+    /// and send the new configuration over the channel.
+    ///
+    /// If there is an error reading the file, it will print an error message
+    /// and continue watching the file.
+    ///
+    /// The function will return an error if there is a problem setting up the
+    /// file watcher.
+    ///
+    /// This function is intended to be used with a `tokio::spawn` call, as it
+    /// will block until the file watcher is stopped.
+    ///
+    /// # Examples
+    ///
+    /// 
 pub async fn watch_config<T, U>(
     path: T,
     sender: mpsc::UnboundedSender<U>,

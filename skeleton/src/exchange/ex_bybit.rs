@@ -50,6 +50,16 @@ impl Exchange for BybitClient {
     type BatchOrdersOutput = Result<Vec<Vec<LiveOrder>>, BybitError>;
     type BatchAmendsOutput = Result<Vec<LiveOrder>, BybitError>;
     type SymbolInformationOutput = Result<SymbolInfo, BybitError>;
+    /// Initializes a new `BybitClient` instance.
+    ///
+    /// # Arguments
+    ///
+    /// - `api_key`: Bybit API key
+    /// - `api_secret`: Bybit API secret
+    ///
+    /// # Returns
+    ///
+    /// A new `BybitClient` instance
     fn init(api_key: String, api_secret: String) -> Self {
         Self {
             api_key,
@@ -59,11 +69,30 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Gets the current server time in milliseconds.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the current server time in milliseconds as a `u64` if successful, else an error.
     async fn time(&self) -> Self::TimeOutput {
         let general: General = Bybit::new(None, None);
         Ok(general.get_server_time().await?.result.time_second * 1000 as u64)
     }
 
+    /// Gets the fee tier for the given symbol.
+    ///
+    /// # Arguments
+    ///
+    /// - `symbol`: The symbol for which to get the fee tier
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the fee tier as a `String` for the given symbol.
+    ///
+    /// # Notes
+    ///
+    /// The `symbol` argument is currently ignored, and the fee tier is always
+    /// retrieved for the entire account.
     async fn fees(&self, symbol: String) -> Self::FeeOutput {
         let account: AccountManager =
             Bybit::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
@@ -73,6 +102,17 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Sets the leverage for the given symbol.
+    ///
+    /// # Arguments
+    ///
+    /// - `symbol`: The symbol for which to set the leverage
+    /// - `leverage`: The leverage to set
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a boolean indicating whether the leverage was
+    /// successfully set.
     async fn set_leverage(&self, symbol: &str, leverage: u8) -> Self::LeverageOutput {
         let account: PositionManager =
             Bybit::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
@@ -91,6 +131,15 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Creates a new `Trader` instance with the given receive window.
+    ///
+    /// # Arguments
+    ///
+    /// - `recv_window`: The receive window in milliseconds.
+    ///
+    /// # Returns
+    ///
+    /// A new `Trader` instance.
     fn trader(&self, recv_window: u16) -> Self::TraderOutput {
         let config = { Config::default().set_recv_window(recv_window) };
         let trader: Trader = Bybit::new_with_config(
@@ -101,6 +150,25 @@ impl Exchange for BybitClient {
         trader
     }
 
+    /// Places a new order on Bybit.
+    ///
+    /// # Arguments
+    ///
+    /// - `symbol`: The symbol of the market to place the order in.
+    /// - `price`: The price to place the order at.
+    /// - `qty`: The quantity of the order.
+    /// - `is_buy`: Whether to place a buy or sell order.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `LiveOrder` representing the order that was placed.
+    ///
+    /// # Notes
+    ///
+    /// The `price` is the limit price, and the `qty` is the quantity of the order.
+    /// The `is_buy` argument is used to determine whether to place a buy or sell
+    /// order. If `is_buy` is `true`, a buy order is placed. If `is_buy` is `false`,
+    /// a sell order is placed.
     async fn place_order(
         &self,
         symbol: &str,
@@ -143,6 +211,24 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Amends an existing order on Bybit.
+    ///
+    /// # Arguments
+    ///
+    /// - `order_id`: The ID of the order to amend.
+    /// - `price`: The new price to place the order at.
+    /// - `qty`: The new quantity of the order.
+    /// - `symbol`: The symbol of the market to amend the order in.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `LiveOrder` representing the amended order.
+    ///
+    /// # Notes
+    ///
+    /// The `order_id` is the ID of the order to amend. The `price` and `qty` are
+    /// the new price and quantity to place the order at. The `symbol` is the symbol
+    /// of the market to amend the order in.
     async fn amend_order(
         &self,
         order_id: &str,
@@ -175,6 +261,21 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Cancels an existing order on Bybit.
+    ///
+    /// # Arguments
+    ///
+    /// - `order_id`: The ID of the order to cancel.
+    /// - `symbol`: The symbol of the market to cancel the order in.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the result of the cancellation.
+    ///
+    /// # Notes
+    ///
+    /// The `order_id` is the ID of the order to cancel. The `symbol` is the symbol
+    /// of the market to cancel the order in.
     async fn cancel_order(&self, order_id: &str, symbol: &str) -> Self::CancelOrderOutput {
         let trader = self.trader(2500);
         let request = CancelOrderRequest {
@@ -200,6 +301,19 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Cancels all open orders on Bybit.
+    ///
+    /// # Arguments
+    ///
+    /// - `symbol`: The symbol of the market to cancel all orders in.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a list of the orders that were cancelled.
+    ///
+    /// # Notes
+    ///
+    /// The `symbol` is the symbol of the market to cancel all orders in.
     async fn cancel_all(&self, symbol: &str) -> Self::CancelAllOutput {
         let trader = self.trader(2500);
         let request = CancelallRequest {
@@ -220,6 +334,23 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Amends multiple orders on Bybit.
+    ///
+    /// # Arguments
+    ///
+    /// - `orders`: A list of the orders to amend.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a list of the orders that were amended.
+    ///
+    /// # Notes
+    ///
+    /// The `orders` argument is a list of the orders to amend. Each order is
+    /// represented by a `BatchAmend` struct. The `BatchAmend` struct contains
+    /// the symbol of the market to amend the order in, the ID of the order to
+    /// amend, the new price to place the order at, and the new quantity of the
+    /// order.
     async fn batch_amends(&self, orders: Vec<BatchAmend>) -> Self::BatchAmendsOutput {
         let trader = self.trader(2500);
         let mut amends = Vec::with_capacity(10);
@@ -262,6 +393,24 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Places multiple orders on Bybit.
+    ///
+    /// # Arguments
+    ///
+    /// - `orders`: A list of the orders to place.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a list of the orders that were placed.
+    ///
+    /// # Notes
+    ///
+    /// The `orders` argument is a list of the orders to place. Each order is
+    /// represented by a `BatchOrder` struct. The `BatchOrder` struct contains
+    /// the symbol of the market to place the order in, the price to place the
+    /// order at, the quantity of the order, and a boolean indicating whether
+    /// the order is a buy or sell.
+    ///
     async fn batch_orders(&self, orders: Vec<BatchOrder>) -> Self::BatchOrdersOutput {
         let trader = self.trader(2500);
         let request = orders.clone().into_req();
@@ -327,6 +476,18 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Retrieves symbol information from Bybit.
+    ///
+    /// This function retrieves the symbol information for a given symbol, and returns a `SymbolInfo` object.
+    /// The `SymbolInfo` object contains the following fields:
+    ///
+    /// * `tick_size`: The tick size of the symbol.
+    /// * `lot_size`: The minimum lot size of the symbol.
+    /// * `min_notional`: The minimum notional value of the symbol.
+    /// * `min_qty`: The minimum quantity of the symbol.
+    /// * `post_only_max`: The maximum post-only quantity of the symbol.
+    ///
+    /// If the request fails, the function will panic with the error message.
     async fn get_symbol_info(&self, symbol: &str) -> Self::SymbolInformationOutput {
         let market_data: MarketData = Bybit::new(None, None);
         let request = InstrumentRequest::new(Category::Linear, Some(symbol), None, None, None);
@@ -361,6 +522,24 @@ impl Exchange for BybitClient {
             }
         }
     }
+    /// Subscribes to Bybit futures market data for the given symbols and sends
+    /// it over the given sender channel.
+    ///
+    /// The data is sent as a `BybitMarket` struct, which contains the order
+    /// book, last trades, and ticker data.
+    ///
+    /// This function blocks until the subscription is stopped or an error occurs.
+    ///
+    /// The `sender` channel must be kept open for the duration of the
+    /// subscription, as the data is sent over it.
+    ///
+    /// The `symbols` parameter is a vector of strings representing the symbols
+    /// to subscribe to. The symbols must be in the format of `<symbol>@<exchange>`.
+    ///
+    /// The `sender` parameter is an unbounded sender channel that will receive
+    /// the market data.
+    ///
+    /// The function returns an empty tuple.
     async fn market_subscribe(
         &self,
         symbols: Vec<String>,
@@ -481,6 +660,22 @@ impl Exchange for BybitClient {
         }
     }
 
+    /// Subscribes to Bybit user stream data for the given symbol and sends it over the given sender channel.
+    ///
+    /// The data is sent as a `BybitPrivate` struct, which contains the user's wallet, positions, order book, and order data.
+    ///
+    /// The `sender` channel must be kept open for the duration of the subscription, as the data is sent over it.
+    ///
+    /// The function returns an empty tuple.
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol` - The symbol to subscribe to.
+    /// * `sender` - An unbounded sender channel that will receive the user stream data.
+    ///
+    /// # Returns
+    ///
+    /// An empty tuple.
     async fn private_subscribe(
         &self,
         symbol: String,
@@ -583,6 +778,7 @@ impl OrderBook for BybitBook {
     type Ask = Ask;
     type Bid = Bid;
 
+    /// Creates a new `BybitBook` with all fields initialized to zero.
     fn new() -> Self {
         Self {
             last_update: 0,
@@ -607,6 +803,21 @@ impl OrderBook for BybitBook {
         }
     }
 
+    /// Resets the order book to a new state.
+    ///
+    /// # Arguments
+    ///
+    /// * `asks`: The new asks for the order book.
+    /// * `bids`: The new bids for the order book.
+    /// * `timestamp`: The new timestamp for the order book.
+    /// * `sequence`: The new sequence number for the order book.
+    ///
+    /// # Effects
+    ///
+    /// * Sets `last_update` to `timestamp`.
+    /// * Sets `sequence` to `sequence`.
+    /// * Replaces the current asks and bids with `asks` and `bids`.
+    /// * Removes any asks or bids with a quantity of 0.
     fn reset(&mut self, asks: Vec<Self::Ask>, bids: Vec<Self::Bid>, timestamp: u64, sequence: u64) {
         self.last_update = timestamp;
         self.sequence = sequence;
@@ -628,6 +839,23 @@ impl OrderBook for BybitBook {
         }
     }
 
+    /// Updates the order book with new data.
+    ///
+    /// # Arguments
+    ///
+    /// * `asks`: The new asks for the order book.
+    /// * `bids`: The new bids for the order book.
+    /// * `timestamp`: The new timestamp for the order book.
+    /// * `sequence`: The new sequence number for the order book.
+    ///
+    /// # Effects
+    ///
+    /// * Sets `last_update` to `timestamp`.
+    /// * Sets `sequence` to `sequence`.
+    /// * Updates the bids in the order book.
+    /// * Removes any bids or asks with a quantity of 0.
+    /// * Sets the best bid and best ask based on the highest bid price and lowest ask price in the order book.
+    /// * Calculates the mid price.
     fn update_bba(
         &mut self,
         asks: Vec<Self::Ask>,
@@ -725,6 +953,16 @@ impl OrderBook for BybitBook {
         self.set_mid_price();
     }
 
+    /// Updates the order book with the given asks and bids at the given timestamp.
+    ///
+    /// This function will not update the order book if the given timestamp is less than or equal
+    /// to the last update timestamp.
+    ///
+    /// The update is done in the following way:
+    ///  - The asks and bids are iterated over and only the ones with a price higher than or equal
+    ///    to the top ask threshold and lower than or equal to the top bid threshold are considered.
+    ///  - The quantity of the asks and bids is updated in the order book.
+    ///  - Any asks or bids with a quantity of 0 are removed from the order book.
     fn update(
         &mut self,
         asks: Vec<Self::Ask>,
@@ -779,14 +1017,31 @@ impl OrderBook for BybitBook {
         self.bids.retain(|_, &mut v| v != 0.0);
     }
 
+    /// Sets the mid price of the order book.
+    ///
+    /// The mid price is calculated as the average of the best ask and best bid prices.
     fn set_mid_price(&mut self) {
-        self.mid_price = (self.best_ask.price + self.best_bid.price) / 2.0;
+        self.mid_price = (self.best_ask.price + self.best_bid.price) * 0.5;
     }
 
+    /// Returns the mid price of the order book.
+    ///
+    /// The mid price is calculated as the average of the best ask and best bid prices.
     fn get_mid_price(&self) -> f64 {
         self.mid_price
     }
 
+    /// Returns a tuple of vectors of the top N asks and bids, respectively.
+    ///
+    /// The asks are returned in ascending order of price, and the bids in descending order.
+    ///
+    /// # Arguments
+    ///
+    /// * `depth`: The number of asks and bids to return.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of vectors of the top N asks and bids, respectively.
     fn get_depth(&self, depth: usize) -> (Vec<Self::Ask>, Vec<Self::Bid>) {
         let asks: Vec<Self::Ask> = {
             let mut ask_vec = Vec::new();
@@ -812,39 +1067,95 @@ impl OrderBook for BybitBook {
         (asks, bids)
     }
 
+    /// Returns a clone of the best ask in the order book.
+    ///
+    /// The best ask is the highest price ask in the order book.
     fn get_best_ask(&self) -> Self::Ask {
         self.best_ask.clone()
     }
 
+    /// Returns a clone of the best bid in the order book.
+    ///
+    /// The best bid is the lowest price bid in the order book.
     fn get_best_bid(&self) -> Self::Bid {
         self.best_bid.clone()
     }
 
+    /// Returns a tuple of the best ask and best bid in the order book.
+    ///
+    /// The best ask is the highest price ask in the order book, and the best bid is the lowest price
+    /// bid in the order book.
     fn get_bba(&self) -> (Self::Ask, Self::Bid) {
         (self.best_ask.clone(), self.best_bid.clone())
     }
 
+    /// Returns the spread between the best ask and best bid in the order book.
+    ///
+    /// The spread is calculated as the difference between the best ask price and the best bid price.
+    ///
+    /// # Returns
+    ///
+    /// The spread between the best ask and best bid in the order book.
     fn get_spread(&self) -> f64 {
         self.best_ask.price - self.best_bid.price
     }
+    /// Returns the spread between the best ask and best bid in the order book, in ticks.
+    ///
+    /// The spread is calculated as the difference between the best ask price and the best bid price,
+    /// divided by the tick size.
     fn get_spread_in_ticks(&self) -> f64 {
         (self.best_ask.price - self.best_bid.price) / self.tick_size
     }
+    /// Returns the lot size of the order book.
+    ///
+    /// The lot size is the minimum quantity that can be traded in the symbol.
     fn get_lot_size(&self) -> f64 {
         self.lot_size
     }
+    /// Returns the minimum notional value of the symbol.
+    ///
+    /// The minimum notional value is the minimum value that can be traded in the symbol.
     fn get_min_notional(&self) -> f64 {
         self.min_notional
     }
+    /// Returns the post-only maximum quantity of the symbol.
+    ///
+    /// The post-only maximum quantity is the maximum quantity that can be posted to the order book
+    /// using a post-only order.
     fn get_post_only_max_qty(&self) -> f64 {
         self.post_only_max
     }
+    /// Returns the tick size of the symbol.
+    ///
+    /// The tick size is the minimum price increment for the symbol.
     fn get_tick_size(&self) -> f64 {
         self.tick_size
     }
+    /// Returns the minimum quantity of the symbol.
+    ///
+    /// The minimum quantity is the minimum amount that can be traded in the symbol.
     fn min_qty(&self) -> f64 {
         self.min_qty
     }
+    /// Calculates the weighted mid price of the order book.
+    ///
+    /// The weighted mid price is calculated as the weighted average of the best bid and best ask
+    /// prices, where the weights are the quantities at the best bid and best ask. The `depth`
+    /// parameter can be used to specify the depth of the order book to use when calculating the
+    /// weighted mid price. If `depth` is `None`, the best bid and best ask quantities are used.
+    ///
+    /// The weighted mid price is calculated as follows:
+    ///
+    /// * Let `weighted_bid_qty` be the weighted bid quantity, calculated by summing the products
+    ///   of the prices and quantities of the bids in the order book, starting from the best bid
+    ///   and going down in price.
+    /// * Let `weighted_ask_qty` be the weighted ask quantity, calculated by summing the products
+    ///   of the prices and quantities of the asks in the order book, starting from the best ask
+    ///   and going up in price.
+    /// * Let `total_qty` be the sum of `weighted_bid_qty` and `weighted_ask_qty`.
+    /// * The weighted mid price is then calculated as `(best_bid_price * (1.0 - imbalance)) +
+    ///   (best_ask_price * imbalance)`, where `imbalance` is `weighted_bid_qty / total_qty`.
+    /// * If `imbalance` is 0.0, the weighted mid price is set to the mid price of the order book.
     fn get_wmid(&self, depth: Option<usize>) -> f64 {
         let imbalance = {
             let (weighted_bid_qty, weighted_ask_qty) = if let Some(depth) = depth {
@@ -867,6 +1178,12 @@ impl OrderBook for BybitBook {
             self.mid_price
         }
     }
+    /// Returns the effective spread for a given side of the order book.
+    ///
+    /// The effective spread is the difference between the best bid/ask price and the mid price of
+    /// the order book. If `is_buy` is `true`, the effective spread is calculated as the difference
+    /// between the best bid price and the mid price. If `is_buy` is `false`, the effective spread is
+    /// calculated as the difference between the mid price and the best ask price.
     fn effective_spread(&self, is_buy: bool) -> f64 {
         if is_buy {
             self.best_bid.price - self.mid_price
@@ -874,6 +1191,26 @@ impl OrderBook for BybitBook {
             self.mid_price - self.best_ask.price
         }
     }
+    /// Calculates the microprice of the order book.
+    ///
+    /// The microprice is a measure of the order book imbalance, calculated as the weighted
+    /// average of the best bid and best ask prices. The weights are the quantities at the best
+    /// bid and best ask. The `depth` parameter can be used to specify the depth of the order
+    /// book to use when calculating the microprice. If `depth` is `None`, the best bid and best
+    /// ask quantities are used. If the total quantity is 0, the mid price of the order book is
+    /// returned.
+    ///
+    /// The microprice is calculated as follows:
+    ///
+    /// * Let `bid_qty` be the weighted bid quantity, calculated by summing the products of the
+    ///   prices and quantities of the bids in the order book, starting from the best bid and
+    ///   going down in price.
+    /// * Let `ask_qty` be the weighted ask quantity, calculated by summing the products of the
+    ///   prices and quantities of the asks in the order book, starting from the best ask and
+    ///   going up in price.
+    /// * Let `total_qty` be the sum of `bid_qty` and `ask_qty`.
+    /// * The microprice is then calculated as `(best_ask_price * qty_ratio) + (best_bid_price *
+    ///   (1.0 - qty_ratio))`, where `qty_ratio` is `bid_qty / total_qty`.
     fn get_microprice(&self, depth: Option<usize>) -> f64 {
         let (bid_qty, ask_qty) = match depth {
             Some(depth) => (
@@ -892,6 +1229,24 @@ impl OrderBook for BybitBook {
         (self.best_ask.price * qty_ratio) + (self.best_bid.price * (1.0 - qty_ratio))
     }
 
+    /// Calculates the price impact of the difference between the order book and the old order book.
+    ///
+    /// The price impact is a measure of the change in the order book imbalance between the old and
+    /// new order books. The price impact is calculated as the sum of the bid and ask impacts.
+    ///
+    /// The bid impact is calculated as the difference in the volume at the best bid between the old
+    /// and new order books. If the best bid price has increased or the volume at the best bid has
+    /// increased, the bid impact is positive. If the best bid price has decreased or the volume at
+    /// the best bid has decreased, the bid impact is negative.
+    ///
+    /// The ask impact is calculated as the difference in the volume at the best ask between the old
+    /// and new order books. If the best ask price has decreased or the volume at the best ask has
+    /// increased, the ask impact is positive. If the best ask price has increased or the volume at
+    /// the best ask has decreased, the ask impact is negative.
+    ///
+    /// The `depth` parameter can be used to specify the depth of the order book to use when
+    /// calculating the price impact. If `depth` is `None`, the best bid and best ask quantities are
+    /// used.
     fn price_impact(&self, old_book: &Self, depth: Option<usize>) -> f64 {
         // Calculate the volume at the bid and ask offsets
         let (mut old_bid_vol, mut curr_bid_vol, old_bid_price, curr_bid_price) = (
@@ -949,6 +1304,21 @@ impl OrderBook for BybitBook {
         bid_impact + ask_impact
     }
 
+    /// Calculates the imbalance ratio of the order book.
+    ///
+    /// The imbalance ratio is a measure of the imbalance between the bid and ask sides of the
+    /// order book. It is calculated as the difference between the weighted bid and ask quantities,
+    /// divided by the sum of the weighted bid and ask quantities. The `depth` parameter can be
+    /// used to specify the depth of the order book to use when calculating the imbalance ratio.
+    /// If `depth` is `None`, the best bid and best ask quantities are used.
+    ///
+    /// The imbalance ratio is a value between -1.0 and 1.0. A positive imbalance ratio indicates
+    /// that the bid side is stronger, while a negative imbalance ratio indicates that the ask side
+    /// is stronger. An imbalance ratio of 0.0 indicates that the order book is balanced.
+    ///
+    /// # Returns
+    ///
+    /// The imbalance ratio of the order book.
     fn imbalance_ratio(&self, depth: Option<usize>) -> f64 {
         // Initialize the weighted bid and ask quantities to the quantities of the best bid and ask.
         let (weighted_bid_qty, weighted_ask_qty) = if let Some(depth) = depth {
@@ -977,6 +1347,31 @@ impl OrderBook for BybitBook {
         }
     }
 
+    /// Calculates the order flow imbalance of the order book.
+    ///
+    /// The order flow imbalance is a measure of the change in the order book imbalance
+    /// between the old and new order books. The order flow imbalance is calculated as
+    /// the sum of the bid and ask order flow imbalances.
+    ///
+    /// The bid order flow imbalance is calculated as the difference in the volume at the
+    /// best bid between the old and new order books. If the best bid price has increased or
+    /// the volume at the best bid has increased, the bid order flow imbalance is positive.
+    /// If the best bid price has decreased or the volume at the best bid has decreased, the
+    /// bid order flow imbalance is negative.
+    ///
+    /// The ask order flow imbalance is calculated as the difference in the volume at the
+    /// best ask between the old and new order books. If the best ask price has decreased or
+    /// the volume at the best ask has increased, the ask order flow imbalance is positive.
+    /// If the best ask price has increased or the volume at the best ask has decreased, the
+    /// ask order flow imbalance is negative.
+    ///
+    /// The `depth` parameter can be used to specify the depth of the order book to use when
+    /// calculating the order flow imbalance. If `depth` is `None`, the best bid and best ask
+    /// quantities are used.
+    ///
+    /// # Returns
+    ///
+    /// The order flow imbalance of the order book.
     fn ofi(&self, old_book: &Self, depth: Option<usize>) -> f64 {
         let bid_ofi = {
             if self.best_bid.price > old_book.best_bid.price {
@@ -1033,6 +1428,25 @@ impl OrderBook for BybitBook {
         ofi
     }
 
+    /// Calculates the volume imbalance of the order book.
+    ///
+    /// The volume imbalance is a measure of the difference in the volume at the best bid and
+    /// best ask between the old and new order books. If the best bid price has increased or the
+    /// volume at the best bid has increased, the bid volume imbalance is positive. If the best
+    /// bid price has decreased or the volume at the best bid has decreased, the bid volume
+    /// imbalance is negative.
+    ///
+    /// If the best ask price has decreased or the volume at the best ask has increased, the ask
+    /// volume imbalance is positive. If the best ask price has increased or the volume at the
+    /// best ask has decreased, the ask volume imbalance is negative.
+    ///
+    /// The `depth` parameter can be used to specify the depth of the order book to use when
+    /// calculating the volume imbalance. If `depth` is `None`, the best bid and best ask
+    /// quantities are used.
+    ///
+    /// # Returns
+    ///
+    /// The volume imbalance of the order book.
     fn voi(&self, old_book: &Self, depth: Option<usize>) -> f64 {
         // Calculate the volume at the bid side
         let bid_v = match self.best_bid.price {
@@ -1085,6 +1499,22 @@ impl OrderBook for BybitBook {
         diff
     }
 
+    /// Calculates the weighted ask quantity of the order book.
+    ///
+    /// The weighted ask quantity is calculated by summing the products of the prices and
+    /// quantities of the asks in the order book, starting from the best ask and going up in
+    /// price. The `depth` parameter can be used to specify the depth of the order book to use
+    /// when calculating the weighted ask quantity. If `depth` is `None`, the best ask quantity
+    /// is used.
+    ///
+    /// The `decay_rate` parameter can be used to specify the decay rate for the weighted ask
+    /// quantity. If `decay_rate` is `None`, no decay is applied. Otherwise, the decay rate is
+    /// applied to each ask based on its position in the order book. The decay rate is calculated
+    /// as `decay_rate ^ (position / depth)`.
+    ///
+    /// # Returns
+    ///
+    /// The weighted ask quantity of the order book.
     fn calculate_weighted_ask(&self, depth: usize, decay_rate: Option<f64>) -> f64 {
         self.asks
             .iter()
@@ -1094,6 +1524,22 @@ impl OrderBook for BybitBook {
             .sum::<f64>()
     }
 
+    /// Calculates the weighted bid quantity of the order book.
+    ///
+    /// The weighted bid quantity is calculated by summing the products of the prices and
+    /// quantities of the bids in the order book, starting from the best bid and going down in
+    /// price. The `depth` parameter can be used to specify the depth of the order book to use
+    /// when calculating the weighted bid quantity. If `depth` is `None`, the best bid quantity
+    /// is used.
+    ///
+    /// The `decay_rate` parameter can be used to specify the decay rate for the weighted bid
+    /// quantity. If `decay_rate` is `None`, no decay is applied. Otherwise, the decay rate is
+    /// applied to each bid based on its position in the order book. The decay rate is calculated
+    /// as `decay_rate ^ (position / depth)`.
+    ///
+    /// # Returns
+    ///
+    /// The weighted bid quantity of the order book.
     fn calculate_weighted_bid(&self, depth: usize, decay_rate: Option<f64>) -> f64 {
         self.bids
             .iter()
@@ -1105,6 +1551,21 @@ impl OrderBook for BybitBook {
     }
 }
 
+    /// Builds a list of Bybit subscriptions for the given symbols.
+    ///
+    /// The subscriptions that are built are:
+    ///
+    /// - Orderbook with 1, 50, and 200 levels for each symbol
+    /// - The ticker for each symbol
+    /// - The public trades for each symbol
+    ///
+    /// # Arguments
+    ///
+    /// * `symbol` - A vector of strings representing the symbols to subscribe to.
+    ///
+    /// # Returns
+    ///
+    /// A vector of strings representing the subscriptions to make.
 fn build_request(symbol: &[String]) -> Vec<String> {
     let mut request_args = vec![];
     let book_req: Vec<String> = symbol

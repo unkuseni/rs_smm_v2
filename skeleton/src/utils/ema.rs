@@ -10,6 +10,13 @@ pub struct EMA {
 }
 
 impl EMA {
+    /// Creates a new `EMA` with the given window size.
+    ///
+    /// The alpha value will be calculated as 2 / (window + 1).
+    ///
+    /// # Returns
+    ///
+    /// A new `EMA` instance.
     pub fn new(window: usize) -> Self {
         // Ensure window size is at least 1
         let window = window.max(1);
@@ -24,6 +31,15 @@ impl EMA {
         }
     }
 
+    /// Creates a new `EMA` with the given alpha value.
+    ///
+    /// The alpha value is used to calculate the window size using the formula:
+    ///
+    /// window = (2 / alpha) - 1
+    ///
+    /// # Returns
+    ///
+    /// A new `EMA` instance.
     pub fn with_alpha(alpha: f64) -> Self {
         // Ensure alpha is between 0 and 1
         let alpha = alpha.clamp(0.0, 1.0);
@@ -37,6 +53,16 @@ impl EMA {
         }
     }
 
+    /// Updates the EMA with the given price.
+    ///
+    /// If the EMA has not been initialized yet, the price is set as the initial value.
+    /// Otherwise, the EMA is calculated using the formula:
+    ///
+    /// EMA = alpha * price + (1 - alpha) * previous_ema
+    ///
+    /// # Returns
+    ///
+    /// The updated EMA value.
     pub fn update(&mut self, price: f64) -> f64 {
         if !self.initialized {
             self.value = price;
@@ -54,14 +80,21 @@ impl EMA {
         self.value
     }
 
+    /// Returns the current EMA value.
     pub fn value(&self) -> f64 {
         self.value
     }
 
+    /// Returns whether the EMA has been initialized yet.
+    ///
+    /// The EMA is considered initialized after the first call to `update`.
     pub fn is_initialized(&self) -> bool {
         self.initialized
     }
 
+    /// Resets the EMA to its initial state.
+    ///
+    /// Sets the current value to 0.0, sets `initialized` to false, and clears the history.
     pub fn reset(&mut self) {
         self.value = 0.0;
         self.initialized = false;
