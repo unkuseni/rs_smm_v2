@@ -377,7 +377,7 @@ impl Exchange for BybitClient {
             market_data.books.insert(k.clone(), BybitBook::new());
             market_data
                 .trades
-                .insert(k.clone(), VecDeque::with_capacity(5000));
+                .insert(k.clone(), VecDeque::with_capacity(1000));
             market_data.ticker.insert(k, VecDeque::with_capacity(10));
         }
         for k in symbols {

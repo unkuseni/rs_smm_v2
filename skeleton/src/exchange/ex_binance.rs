@@ -255,7 +255,7 @@ impl Exchange for BinanceClient {
             market_data.books.insert(k.clone(), BinanceBook::new());
             market_data
                 .trades
-                .insert(k.clone(), VecDeque::with_capacity(5000));
+                .insert(k.clone(), VecDeque::with_capacity(1000));
             market_data.ticker.insert(k, VecDeque::with_capacity(10));
         }
         let book_snapshot = (market_data.clone(), symbols.clone());
