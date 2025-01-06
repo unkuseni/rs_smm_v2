@@ -33,7 +33,9 @@ impl SharedState {
     pub fn add_clients(&mut self, symbol: String, client: BybitClient) {
         self.symbols.push(symbol.clone());
         self.clients.insert(symbol.clone(), client);
-        self.privates.entry(symbol).or_insert(BybitPrivate::default());
+        self.privates
+            .entry(symbol)
+            .or_insert(BybitPrivate::default());
     }
 
     pub async fn load_data(self, state_sender: mpsc::UnboundedSender<SharedState>) {

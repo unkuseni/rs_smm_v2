@@ -1,4 +1,6 @@
-use std::future::Future;
+use std::{collections::VecDeque, future::Future};
+use binance::model::AggrTradesEvent;
+use bybit::model::WsTrade;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::utils::models::{BatchAmend, BatchOrder, BinanceMarket, BybitMarket};
@@ -75,4 +77,10 @@ pub trait Exchange {
 pub enum MarketData {
     Bybit(BybitMarket),
     Binance(BinanceMarket),
+}
+
+
+pub enum TradeType {
+    Bybit(VecDeque<WsTrade>),
+    Binance(VecDeque<AggrTradesEvent>),
 }
