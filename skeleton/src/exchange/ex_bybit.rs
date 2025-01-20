@@ -177,7 +177,7 @@ impl Exchange for BybitClient {
         is_buy: bool,
     ) -> Self::PlaceOrderOutput {
         let trader = self.trader(2500);
-        match trader
+        match tradere
             .place_futures_limit_order(
                 bybit::model::Category::Linear,
                 symbol,
@@ -513,7 +513,7 @@ impl Exchange for BybitClient {
                 Ok(data)
             }
             Err(e) => {
-                let error_message = format!("Order failed. Error: {}", e);
+                let error_message = format!("Symbol info failed. Error: {}", e);
                 let _ = self
                     .bot
                     .send_message(&self.logger.error(&error_message))
