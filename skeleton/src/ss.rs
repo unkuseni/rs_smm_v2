@@ -39,6 +39,58 @@ impl SharedState {
     }
 
     pub async fn load_data(self, state_sender: mpsc::UnboundedSender<SharedState>) {
+        match self.exchange.as_str() {
+            "bybit" => self.load_bybit(state_sender).await,
+            "binance" => self.load_binance(state_sender).await,
+            "both" => self.load_both(state_sender).await,
+            _ => panic!("Invalid exchange"),
+        }
+    }
+
+    async fn load_binance(self, state_sender: mpsc::UnboundedSender<SharedState>) {
+        unimplemented!("Binance not implemented");
+    }
+
+    async fn load_bybit(self, state_sender: mpsc::UnboundedSender<SharedState>) {
+        let state = Arc::new(Mutex::new(self.clone()));
+
+        let (bybit_market_sender, mut bybit_market_receiver) =
+            mpsc::unbounded_channel::<BybitMarket>();
+        let (bybit_private_sender, mut bybit_private_receiver) =
+            mpsc::unbounded_channel::<(String, BybitPrivate)>();
+
+        let symbols = self.symbols.clone();
+        for (symbol, client) in self.clients {
+            let private_clone = bybit_private_sender.clone();
+            tokio::spawn(async move {
+                client.private_subscribe(symbol, private_clone).await;
+            });
+        }
+
+        tokio::spawn(async move {
+            let market_stream = BybitClient::init("".to_string(), "".to_string());
+            market_stream
+                .market_subscribe(symbols, bybit_market_sender)
+                .await;
+        });
+
+        loop {
+            tokio::select! {
+            Some(data) = bybit_market_receiver.recv() => {
+                let mut state = state.lock().await;
+                state.markets[0] = MarketData::Bybit(data);
+                state_sender.send(state.clone()).unwrap();
+                }
+            Some(data) = bybit_private_receiver.recv() => {
+                let mut state = state.lock().await;
+                state.privates.insert(data.0, data.1);
+                state_sender.send(state.clone()).unwrap();
+                }
+            }
+        }
+    }
+
+    async fn load_both(self, state_sender: mpsc::UnboundedSender<SharedState>) {
         let state = Arc::new(Mutex::new(self.clone()));
 
         let (bybit_market_sender, mut bybit_market_receiver) =

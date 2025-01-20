@@ -4,6 +4,7 @@ mod tests {
 
     use skeleton::exchange::exchange::{Exchange, MarketData};
     use skeleton::ss::SharedState;
+
     use skeleton::utils::localorderbook::OrderBook;
     use skeleton::utils::models::{BinanceClient, BinanceMarket, BybitClient};
     use tokio::sync::mpsc;
@@ -89,7 +90,7 @@ mod tests {
     async fn test_state() {
         let mut ss = SharedState::new("bybit".to_string());
         ss.add_clients(
-            "SOLUSDT".to_string(),
+            "DOGSUSDT".to_string(),
             BybitClient::init("".to_string(), "".to_string()),
         );
         let (sender, mut receiver) = mpsc::unbounded_channel();
@@ -99,39 +100,23 @@ mod tests {
         let instant = std::time::Instant::now();
         while let Some(v) = receiver.recv().await {
             println!(
-                "Shared State: Bybit WMID: {:#?}  Binance WMID: {:#?}\n",
+                "Shared State: Bybit WMID: {:.7}",
                 match &v.markets[0] {
                     MarketData::Binance(m) => {
-                        if let Some(event) = m.books.get("SOLUSDT") {
-                            event.get_wmid(Some(4))
+                        if let Some(event) = m.books.get("DOGSUSDT") {
+                            event.get_wmid(Some(3))
                         } else {
                             0.0
                         }
                     }
                     MarketData::Bybit(m) => {
-                        if let Some(event) = m.books.get("SOLUSDT") {
-                            event.get_wmid(Some(4))
+                        if let Some(event) = m.books.get("DOGSUSDT") {
+                            event.get_wmid(Some(3))
                         } else {
                             0.0
                         }
                     }
                 },
-                match &v.markets[1] {
-                    MarketData::Binance(m) => {
-                        if let Some(event) = m.books.get("SOLUSDT") {
-                            event.get_wmid(Some(4))
-                        } else {
-                            0.0
-                        }
-                    }
-                    MarketData::Bybit(m) => {
-                        if let Some(event) = m.books.get("SOLUSDT") {
-                            event.get_wmid(Some(4))
-                        } else {
-                            0.0
-                        }
-                    }
-                }
             );
             if instant.elapsed() > Duration::from_secs(60) {
                 println!("Shared State: {:#?}", v.markets[0]);
