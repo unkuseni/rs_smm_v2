@@ -6,7 +6,7 @@ use super::models::Config;
 
 static BOT: OnceCell<Bot> = OnceCell::const_new();
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LiveBot {
     chat_id: i64,
     token: String,
