@@ -6,3 +6,4 @@ pub mod bot;
 pub mod localorderbook;
 pub mod number;
 pub mod ema;
+pub mod vol;

@@ -6,19 +6,12 @@ pub struct EMA {
     alpha: f64,
     value: f64,
     initialized: bool,
-    values: VecDeque<f64>,  // Optional: only if you need history
+    history: Option<VecDeque<f64>>,  // Now memory-efficient
 }
 
 impl EMA {
-    /// Creates a new `EMA` with the given window size.
-    ///
-    /// The alpha value will be calculated as 2 / (window + 1).
-    ///
-    /// # Returns
-    ///
-    /// A new `EMA` instance.
+    /// Creates a new EMA with history disabled by default
     pub fn new(window: usize) -> Self {
-        // Ensure window size is at least 1
         let window = window.max(1);
         let alpha = 2.0 / (window + 1) as f64;
         
@@ -27,89 +20,73 @@ impl EMA {
             alpha,
             value: 0.0,
             initialized: false,
-            values: VecDeque::with_capacity(window),
+            history: None,
         }
     }
 
-    /// Creates a new `EMA` with the given alpha value.
-    ///
-    /// The alpha value is used to calculate the window size using the formula:
-    ///
-    /// window = (2 / alpha) - 1
-    ///
-    /// # Returns
-    ///
-    /// A new `EMA` instance.
+    /// Creates EMA with custom alpha (0 < alpha <= 1)
     pub fn with_alpha(alpha: f64) -> Self {
-        // Ensure alpha is between 0 and 1
-        let alpha = alpha.clamp(0.0, 1.0);
+        let alpha = alpha.clamp(f64::EPSILON, 1.0);  // Prevent division by zero
+        let window = ((2.0 / alpha) - 1.0).ceil() as usize;
         
         Self {
-            window: ((2.0 / alpha) - 1.0) as usize,
+            window: window.max(1),
             alpha,
             value: 0.0,
             initialized: false,
-            values: VecDeque::new(),
+            history: None,
         }
     }
 
-    /// Updates the EMA with the given price.
-    ///
-    /// If the EMA has not been initialized yet, the price is set as the initial value.
-    /// Otherwise, the EMA is calculated using the formula:
-    ///
-    /// EMA = alpha * price + (1 - alpha) * previous_ema
-    ///
-    /// # Returns
-    ///
-    /// The updated EMA value.
-    pub fn update(&mut self, price: f64) -> f64 {
-        if !self.initialized {
-            self.value = price;
-            self.initialized = true;
-        } else {
-            self.value = self.alpha * price + (1.0 - self.alpha) * self.value;
+    /// Enable circular buffer for historical values (opt-in)
+    pub fn enable_history(&mut self) {
+        if self.history.is_none() {
+            self.history = Some(VecDeque::with_capacity(self.window));
         }
+    }
 
-        // Only if you need to maintain history
-        if self.values.len() == self.window {
-            self.values.pop_front();
+    /// Update EMA with new price, O(1) time complexity
+    pub fn update(&mut self, price: f64) -> f64 {
+        self.value = if !self.initialized {
+            self.initialized = true;
+            price
+        } else {
+            self.alpha.mul_add(price, (1.0 - self.alpha) * self.value)
+        };
+
+        // Maintain history if enabled
+        if let Some(values) = &mut self.history {
+            if values.len() == self.window {
+                values.pop_front();
+            }
+            values.push_back(self.value);
         }
-        self.values.push_back(self.value);
 
         self.value
     }
 
-    /// Returns the current EMA value.
+    /// Get current EMA value
     pub fn value(&self) -> f64 {
         self.value
     }
 
-    /// Returns whether the EMA has been initialized yet.
-    ///
-    /// The EMA is considered initialized after the first call to `update`.
-    pub fn is_initialized(&self) -> bool {
-        self.initialized
+    /// Get historical values if enabled
+    pub fn history(&self) -> Option<&VecDeque<f64>> {
+        self.history.as_ref()
     }
 
-    /// Resets the EMA to its initial state.
-    ///
-    /// Sets the current value to 0.0, sets `initialized` to false, and clears the history.
+    /// Reset to initial state (preserves history config)
     pub fn reset(&mut self) {
         self.value = 0.0;
         self.initialized = false;
-        self.values.clear();
-    }
-
-    // Optional: Get the history of EMA values
-    pub fn history(&self) -> &VecDeque<f64> {
-        &self.values
+        if let Some(values) = &mut self.history {
+            values.clear();
+        }
     }
 }
 
-// Implement Default if needed
 impl Default for EMA {
     fn default() -> Self {
-        Self::new(14) // Common default window size
+        Self::new(14)
     }
 }
