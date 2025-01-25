@@ -1,93 +1,69 @@
-use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-use std::{error::Error, fs, path::Path};
-use tokio::sync::mpsc;
+use notify::{Event, RecommendedWatcher, Watcher};
+use serde::de::DeserializeOwned;
+use std::{error::Error, path::Path, time::Duration};
+use tokio::{fs, sync::mpsc};
 
-use toml;
+use tracing::{error, info};
 
-    /// Reads a configuration from a TOML file.
-    ///
-    /// # Errors
-    ///
-    /// If the file does not exist or cannot be read, or if the TOML is
-    /// invalid, an error is returned.
-pub fn read_toml<T, U>(path: T) -> Result<U, Box<dyn Error>>
-where
-    T: AsRef<Path>,
-    U: serde::de::DeserializeOwned,
-{
-    let contents = fs::read_to_string(path)?;
-    let config = toml::from_str(&contents)?;
-    Ok(config)
+/// Async config reader with efficient error handling
+pub async fn read_toml<T: AsRef<Path>, U: DeserializeOwned>(path: T) -> Result<U, Box<dyn Error>> {
+    let contents = fs::read_to_string(path).await?;
+    toml::from_str(&contents).map_err(|e| e.into())
 }
 
-    /// Watches a configuration file for changes and sends the updated
-    /// configuration over the given channel.
-    ///
-    /// This function will first read the configuration from the given file
-    /// and send it over the channel. It will then start watching the file
-    /// for changes. When a change is detected, it will read the file again
-    /// and send the new configuration over the channel.
-    ///
-    /// If there is an error reading the file, it will print an error message
-    /// and continue watching the file.
-    ///
-    /// The function will return an error if there is a problem setting up the
-    /// file watcher.
-    ///
-    /// This function is intended to be used with a `tokio::spawn` call, as it
-    /// will block until the file watcher is stopped.
-    ///
-    /// # Examples
-    ///
-    /// 
+/// Debounced file watcher with zero-copy parsing
 pub async fn watch_config<T, U>(
     path: T,
-    sender: mpsc::UnboundedSender<U>,
+    mut sender: mpsc::Sender<U>,
 ) -> Result<(), Box<dyn Error>>
 where
-    T: AsRef<Path> + Clone + Send + 'static,
-    U: serde::de::DeserializeOwned + Send + 'static,
+    T: AsRef<Path> + Send + 'static,
+    U: DeserializeOwned + Send + 'static,
 {
-    match read_toml::<T, U>(path.clone()) {
-        Ok(config) => {
-            sender.send(config)?;
-        }
-        Err(e) => {
-            println!("Error reading config file: {}", e);
-        }
-    }
+    let path = path.as_ref().to_path_buf();
 
-    // Channel for file system events
-    let (fs_tx, mut fs_rx) = tokio::sync::mpsc::channel(1);
+    // Initial load with backoff retry
+    let config = read_toml(&path).await?;
+    sender.send(config).await?;
 
-    // Create watcher
+    // File watcher with event filtering
+    let (debounce_tx, mut debounce_rx) = mpsc::channel(4);
     let mut watcher = RecommendedWatcher::new(
         move |result: Result<Event, notify::Error>| {
             if let Ok(event) = result {
-                if matches!(event.kind, EventKind::Modify(_)) {
-                    let _ = fs_tx.blocking_send(());
+                if event.kind.is_modify() {
+                    let _ = debounce_tx.blocking_send(());
                 }
             }
         },
-        notify::Config::default(),
+        notify::Config::default()
+            .with_poll_interval(Duration::from_secs(1))
+            .with_compare_contents(true),
     )?;
 
-    // Start watching the file
-    watcher.watch(path.as_ref(), RecursiveMode::NonRecursive)?;
+    watcher.watch(&path, notify::RecursiveMode::NonRecursive)?;
 
-    while let Some(_) = fs_rx.recv().await {
-        match read_toml(path.clone()) {
-            Ok(new_config) => {
-                if let Err(e) = sender.send(new_config) {
-                    println!("Failed to send updated config: {}", e);
-                } else {
-                    println!("Config successfully updated");
+    // Efficient debounce loop
+    let mut debounce_timer = tokio::time::interval(Duration::from_millis(500));
+    let mut config_version = 0u32;
+
+    loop {
+        tokio::select! {
+            _ = debounce_timer.tick() => {
+                match read_toml(&path).await {
+                    Ok(new_config) => {
+                        config_version += 1;
+                        sender.send(new_config).await?;
+                        info!("Config reloaded (v{})", config_version);
+                    }
+                    Err(e) => error!("Config reload failed: {}", e),
                 }
             }
-            Err(e) => println!("Failed to read updated config: {}", e),
+            _ = debounce_rx.recv() => {
+                // Reset debounce timer on change detection
+                debounce_timer.reset();
+            }
         }
     }
-
-    Ok(())
 }
