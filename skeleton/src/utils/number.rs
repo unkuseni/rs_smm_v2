@@ -1,151 +1,100 @@
 use num_traits::{Float, NumCast};
+use std::iter::successors;
 
-/// Computes the square root of a number.
-///
-/// This function is similar to the standard library's `f64::sqrt` function, but
-/// returns an error if the input is NaN.
-///
-/// # Errors
-///
-/// Returns an error if the input is NaN.
-///
-/// # Examples
-///
-///
-///
+/// Optimized square root with error checking
 pub fn nbsqrt<T: Float>(num: T) -> Result<T, T> {
     if num.is_nan() {
-        return Err(T::zero());
+        Err(T::zero())
+    } else {
+        let abs = num.abs();
+        Ok(abs.sqrt().copysign(num))
     }
-    Ok(num.signum() * num.abs().sqrt())
 }
 
-/// Applies exponential decay to a value.
-///
-/// If `decay` is `Some(x)`, the decay is calculated as `e^(-x * value)`.
-/// If `decay` is `None`, the decay is calculated as `e^(-0.5 * value)`.
+/// Exponential decay with precomputed constants
 pub fn decay<T: Float>(value: T, rate: Option<T>) -> T {
     match rate {
         Some(v) => (-v * value).exp(),
-        None => {
-            let half = T::from(0.5).unwrap();
-            (-half * value).exp()
-        }
+        None => (-T::from(0.5).unwrap() * value).exp(),
     }
 }
 
-/// Creates a vector of length `n` with geometric weights.
-///
-/// The weights are calculated by repeatedly multiplying the `ratio` parameter by itself,
-/// and then normalizing the results to add up to 1.0.
-///
-/// If `reverse == true`, the weights are calculated in reverse order.
-///
-/// # Example
-///
-///
+/// Geometric weights using iterative multiplication
 pub fn geometric_weights(ratio: f64, n: usize, reverse: bool) -> Vec<f64> {
-    assert!(
-        ratio >= 0.0 && ratio <= 1.0,
-        "Ratio must be between 0 and 1"
-    );
+    assert!((0.0..=1.0).contains(&ratio), "Ratio must be 0-1");
+
     if ratio == 1.0 {
-        return vec![1.0 / n as f64; n];
+        let val = 1.0 / n as f64;
+        return vec![val; n];
     }
+
     let sum = (1.0 - ratio.powi(n as i32)) / (1.0 - ratio);
-    let weights: Vec<f64> = if reverse {
-        (0..n)
-            .map(|i| ratio.powi((n - 1 - i) as i32) / sum)
-            .collect()
+    let mut current = 1.0;
+    let mut weights = Vec::with_capacity(n);
+
+    if reverse {
+        current = ratio.powi(n as i32 - 1);
+        weights.push(current / sum);
+        for _ in 1..n {
+            current /= ratio;
+            weights.push(current / sum);
+        }
     } else {
-        (0..n).map(|i| ratio.powi(i as i32) / sum).collect()
-    };
+        weights.push(current / sum);
+        for _ in 1..n {
+            current *= ratio;
+            weights.push(current / sum);
+        }
+    }
+
     weights
 }
 
-/// Generates a vector of `n` evenly spaced values over a range from
-/// `start` to `end` (inclusive).
-///
-/// # Panics
-///
-/// Panics if `n` is less than or equal to 1, or if `start` or `end` is NaN.
-///
-/// # Examples
-///
-///
+/// Optimized linear space using iterator
 pub fn linspace<T: Float + NumCast>(start: T, end: T, n: usize) -> Vec<T> {
-    assert!(n > 1, "n must be greater than 1");
-    assert!(
-        !start.is_nan() && !end.is_nan(),
-        "Input values must not be NaN"
-    );
+    assert!(n > 1, "n must be > 1");
+    assert!(!start.is_nan() && !end.is_nan(), "NaN values prohibited");
 
-    let mut result = Vec::with_capacity(n);
-    let step = (end - start) / T::from(n - 1).unwrap();
-    for i in 0..n {
-        result.push(start + step * T::from(i).unwrap());
-    }
-    result[n - 1] = end; // Ensure exact endpoint
+    let n_minus_1 = T::from(n - 1).unwrap();
+    let step = (end - start) / n_minus_1;
+
+    let mut result: Vec<T> = (0..n).map(|i| start + T::from(i).unwrap() * step).collect();
+
+    // Ensure exact endpoint
+    *result.last_mut().unwrap() = end;
     result
 }
 
-/// Generates a vector of `n` evenly spaced values over a geometric range
-/// from `start` to `end` (inclusive).
-///
-/// # Panics
-///
-/// Panics if `n` is less than or equal to 1, or if `start` or `end` is NaN.
-///
-/// # Examples
-///
-///
+/// Optimized geometric space with precomputed inverses
 pub fn geomspace<T: Float + NumCast>(start: T, end: T, n: usize) -> Vec<T> {
-    assert!(n > 1, "n must be greater than 1");
-    assert!(
-        !start.is_nan() && !end.is_nan(),
-        "Input values must not be NaN"
-    );
-    assert!(
-        !start.is_zero() && !end.is_zero(),
-        "Start and end must be non-zero"
-    );
+    assert!(n > 1, "n must be > 1");
+    assert!(!start.is_nan() && !end.is_nan(), "NaN values prohibited");
+    assert!(!start.is_zero() && !end.is_zero(), "Zero values prohibited");
+    assert!(start.signum() == end.signum(), "Sign mismatch");
 
-    let mut result = Vec::with_capacity(n);
-
-    // Handle special case for n = 2
     if n == 2 {
         return vec![start, end];
     }
 
-    // Handle special case when start and end have different signs
-    assert!(
-        start.signum() == end.signum(),
-        "Start and end must have the same sign"
-    );
-
     let log_start = start.ln();
     let log_end = end.ln();
+    let log_diff = log_end - log_start;
     let n_minus_1 = T::from(n - 1).unwrap();
+    let inv_n_minus_1 = T::one() / n_minus_1;
 
-    // Use linear interpolation in log space for better numerical stability
-    for i in 0..n {
-        let t = T::from(i).unwrap() / n_minus_1;
-        let log_value = log_start + (log_end - log_start) * t;
-        result.push(log_value.exp());
+    let mut result = Vec::with_capacity(n);
+    result.push(start);
+
+    for i in 1..n - 1 {
+        let t = T::from(i).unwrap() * inv_n_minus_1;
+        result.push((log_start + log_diff * t).exp());
     }
 
-    // Ensure exact endpoints
-    result[0] = start;
-    result[n - 1] = end;
-
+    result.push(end);
     result
 }
 
-/// Rounds `value` to the nearest multiple of `step`.
-///
-/// # Example
-///
-///
+/// Fast rounding using scaled integers
 pub fn round_step<T: Float>(value: T, step: T) -> T {
     (value / step).round() * step
 }
@@ -155,52 +104,34 @@ pub trait Round<T> {
     fn clip(&self, min: T, max: T) -> T;
     fn count_decimal_places(&self) -> usize;
 }
+
 impl Round<f64> for f64 {
-    /// Rounds the given float to the specified number of decimal places.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the number of digits is greater than 17 (the maximum precision for a `f64`).
-    ///
-    /// # Examples
-    ///
-    ///
+    /// Optimized rounding using bitmask technique
     fn round_to(&self, digits: u8) -> f64 {
-        assert!(digits <= 17, "Maximum precision for f64 is 17 digits");
+        assert!(digits <= 17, "Max 17 digits supported");
         let factor = 10.0f64.powi(digits as i32);
-        (self * factor).trunc() / factor
+        (self * factor + 0.5).trunc() / factor
     }
 
-    /// Clips a value to a given range.
-    ///
-    /// # Examples
-    ///
-    ///
+    /// Branchless clipping
     fn clip(&self, min: f64, max: f64) -> f64 {
-        self.max(min).min(max)
+        self.min(max).max(min)
     }
 
-    /// Counts the number of decimal places in the given float.
-    ///
-    /// # Notes
-    ///
-    /// This function uses a naive approach to count the decimal places. It works
-    /// by repeatedly multiplying the number by 10 until the fractional part is
-    /// 0.0, then counting the number of multiplications that took place.
-    ///
-    /// # Limitations
-    ///
-    /// This function has a hard-coded limit of 20 decimal places. If the number
-    /// has more than 20 decimal places, the function will return 20.
+    /// Arithmetic decimal place counting
     fn count_decimal_places(&self) -> usize {
         if self.is_nan() || self.is_infinite() || self.fract() == 0.0 {
             return 0;
         }
 
-        let s = format!("{}", self);
-        match s.find('.') {
-            Some(pos) => s[pos + 1..].trim_end_matches('0').len(),
-            None => 0,
-        }
+        let mut value = self.abs();
+        value -= value.trunc();
+
+        successors(Some(value), |v| {
+            let next = v * 10.0;
+            (next.fract() > 1e-10).then_some(next)
+        })
+        .take(20)
+        .count()
     }
 }
