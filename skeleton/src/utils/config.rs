@@ -15,7 +15,7 @@ pub async fn read_toml<T: AsRef<Path>, U: DeserializeOwned>(path: T) -> Result<U
 /// Debounced file watcher with zero-copy parsing
 pub async fn watch_config<T, U>(
     path: T,
-    mut sender: mpsc::Sender<U>,
+    sender: mpsc::Sender<U>,
 ) -> Result<(), Box<dyn Error>>
 where
     T: AsRef<Path> + Send + 'static,
