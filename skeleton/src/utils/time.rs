@@ -24,32 +24,31 @@ pub fn get_formatted_time() -> (u8, u8, u8, bool) {
     let mins = ((ts / 60) % 60) as u8;
     let hours = ((ts / 3600) % 24) as u8;
     let is_pm = hours >= 12;
-    
+
     let hours_12 = match hours % 12 {
         0 => 12,
         h => h,
     };
-    
+
     (hours_12, mins, secs, is_pm)
 }
 
 /// Gets formatted date using O(1) year calculation (optimized)
 #[inline(always)]
-pub fn get_formatted_date() -> (&'static str, u8, u16) {
+pub fn get_formatted_date() -> (&'static str, u8, u64) {
     const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
 
     let days = generate_timestamp().unwrap() / 86400_000; // Days since epoch
     let (year, remaining_days) = compute_year(days);
-    let (month, day) = compute_month_day(remaining_days, is_leap_year(year));
+    let (month, day) = compute_month_day(remaining_days as u16, is_leap_year(year as u16));
 
     (MONTHS[month as usize - 1], day as u8, year)
 }
 
 /// O(1) year computation using mathematical formula
-fn compute_year(mut days: u64) -> (u16, u16) {
+fn compute_year(mut days: u64) -> (u64, u64) {
     // Offset to handle leap years mathematically
     let (mut year, cycles_400) = (1970, days / 146_097);
     days -= cycles_400 * 146_097; // Days in 400-year cycle
@@ -61,12 +60,12 @@ fn compute_year(mut days: u64) -> (u16, u16) {
     year += cycles_4 * 4;
 
     // Handle remaining years (max 3 iterations)
-    while days >= 365 + is_leap_year(year) as u64 {
-        days -= 365 + is_leap_year(year) as u64;
+    while days >= 365 + is_leap_year(year as u16) as u64 {
+        days -= 365 + is_leap_year(year as u16) as u64;
         year += 1;
     }
 
-    (year as u16, days as u16)
+    (year, days)
 }
 
 /// O(1) month/day calculation using binary search
