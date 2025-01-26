@@ -64,7 +64,7 @@ impl Exchange for BybitClient {
     ///
     /// A new `BybitClient` instance
     async fn init(api_key: String, api_secret: String) -> Self {
-        let bot = LiveBot::new("/config.toml").await.unwrap();
+        let bot = LiveBot::new("./config.toml").await.unwrap();
         Self {
             api_key,
             api_secret,
@@ -439,7 +439,7 @@ impl Exchange for BybitClient {
                 .insert(symbol.clone(), VecDeque::with_capacity(1000));
             market_data
                 .ticker
-                .insert(symbol.clone(), VecDeque::with_capacity(10));
+                .insert(symbol.clone(), VecDeque::with_capacity(3));
 
             if let (Some(book), Some(info)) = (market_data.books.get_mut(&symbol), info) {
                 book.update_symbol_info(&info);
@@ -1428,9 +1428,7 @@ fn process_ticker_event(market_data: &mut BybitMarket, tick: WsTicker) {
     let symbol = tick.topic.split('.').nth(1).unwrap();
     if let Some(ticker) = market_data.ticker.get_mut(symbol) {
         if ticker.len() == ticker.capacity() || (ticker.capacity() - ticker.len()) <= 1 {
-            for _ in 0..2 {
-                ticker.pop_front();
-            }
+            ticker.pop_front();
         }
         match tick.data {
             Tickers::Linear(data) => ticker.push_back(data),
@@ -1459,9 +1457,7 @@ fn process_trade_update(market_data: &mut BybitMarket, data: TradeUpdate) {
         if trades.len() == trades.capacity()
             || (trades.capacity() - trades.len()) <= data.data.len()
         {
-            for _ in 0..data.data.len() {
-                trades.pop_front();
-            }
+        trades.drain(..data.data.len());
         }
         trades.extend(data.data);
     }
