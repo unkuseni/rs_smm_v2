@@ -7,6 +7,7 @@ pub struct RollingVolatility {
     sum: f64,
     sum_squares: f64,
     last_price: Option<f64>,
+   pub current_vol: f64,
 }
 
 impl RollingVolatility {
@@ -18,6 +19,7 @@ impl RollingVolatility {
             sum: 0.0,
             sum_squares: 0.0,
             last_price: None,
+            current_vol: 0.0,
         }
     }
 
@@ -48,14 +50,14 @@ impl RollingVolatility {
 
             // Safely unwrap because we have at least 2 returns
             let latest_ret = *self.returns.back().unwrap();
-            
+
             // Handle division by zero if volatility is 0
             let z_score = if vol == 0.0 {
                 0.0
             } else {
                 (latest_ret - mean) / vol
             };
-
+            self.current_vol = vol;
             Some((vol, z_score))
         } else {
             None
@@ -81,5 +83,6 @@ impl RollingVolatility {
         self.sum = 0.0;
         self.sum_squares = 0.0;
         self.last_price = None;
+        self.current_vol = 0.0;
     }
 }
