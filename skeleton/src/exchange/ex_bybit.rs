@@ -6,9 +6,10 @@ use bybit::{
     general::General,
     market::MarketData,
     model::{
-        AmendOrderRequest, Ask, Bid, CancelOrderRequest, CancelallRequest, Category,
-        InstrumentRequest, LeverageRequest, OrderBookUpdate, OrderStatus, Subscription, Tickers,
-        WebsocketEvents,
+        AmendOrderRequest, Ask, Bid, CancelOrderRequest, CancelallRequest, Category, FastExecution,
+        InstrumentRequest, LeverageRequest, OrderBookUpdate, OrderEvent, OrderStatus,
+        PositionEvent, Side, Subscription, Tickers, TradeUpdate, WalletEvent, WebsocketEvents,
+        WsTicker,
     },
     position::PositionManager,
     trade::Trader,
@@ -34,22 +35,24 @@ use crate::utils::{
 
 use super::exchange::Exchange;
 
+type Result<T> = std::result::Result<T, BybitError>;
+
 impl Exchange for BybitClient {
-    type TimeOutput = Result<u64, BybitError>;
-    type FeeOutput = Result<String, BybitError>;
-    type LeverageOutput = Result<bool, BybitError>;
+    type TimeOutput = Result<u64>;
+    type FeeOutput = Result<String>;
+    type LeverageOutput = Result<bool>;
     type TraderOutput = Trader;
     type StreamData = BybitMarket;
     type PrivateStreamData = (String, BybitPrivate);
     type StreamOutput = ();
     type PrivateStreamOutput = ();
-    type PlaceOrderOutput = Result<LiveOrder, BybitError>;
-    type AmendOrderOutput = Result<LiveOrder, BybitError>;
-    type CancelOrderOutput = Result<OrderStatus, BybitError>;
-    type CancelAllOutput = Result<Vec<OrderStatus>, BybitError>;
-    type BatchOrdersOutput = Result<Vec<Vec<LiveOrder>>, BybitError>;
-    type BatchAmendsOutput = Result<Vec<LiveOrder>, BybitError>;
-    type SymbolInformationOutput = Result<SymbolInfo, BybitError>;
+    type PlaceOrderOutput = Result<LiveOrder>;
+    type AmendOrderOutput = Result<LiveOrder>;
+    type CancelOrderOutput = Result<OrderStatus>;
+    type CancelAllOutput = Result<Vec<OrderStatus>>;
+    type BatchOrdersOutput = Result<Vec<Vec<LiveOrder>>>;
+    type BatchAmendsOutput = Result<Vec<LiveOrder>>;
+    type SymbolInformationOutput = Result<SymbolInfo>;
     /// Initializes a new `BybitClient` instance.
     ///
     /// # Arguments
@@ -60,12 +63,12 @@ impl Exchange for BybitClient {
     /// # Returns
     ///
     /// A new `BybitClient` instance
-    fn init(api_key: String, api_secret: String) -> Self {
+    async fn init(api_key: String, api_secret: String) -> Self {
+        let bot = LiveBot::new("/config.toml").await.unwrap();
         Self {
             api_key,
             api_secret,
-            logger: Logger,
-            bot: LiveBot::new().unwrap(),
+            logger: Logger::new(bot),
         }
     }
 
@@ -76,7 +79,7 @@ impl Exchange for BybitClient {
     /// A `Result` containing the current server time in milliseconds as a `u64` if successful, else an error.
     async fn time(&self) -> Self::TimeOutput {
         let general: General = Bybit::new(None, None);
-        Ok(general.get_server_time().await?.result.time_second * 1000 as u64)
+        Ok(general.get_server_time().await?.result.time_second as u64)
     }
 
     /// Gets the fee tier for the given symbol.
@@ -94,12 +97,10 @@ impl Exchange for BybitClient {
     /// The `symbol` argument is currently ignored, and the fee tier is always
     /// retrieved for the entire account.
     async fn fees(&self, symbol: String) -> Self::FeeOutput {
-        let account: AccountManager =
-            Bybit::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
-        match account.get_fee_rate(Category::Spot, Some(symbol)).await {
-            Ok(fee) => Ok(fee.result.list[0].maker_fee_rate.clone()),
-            Err(e) => Err(e),
-        }
+        let account =
+            AccountManager::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
+        let fee = account.get_fee_rate(Category::Spot, Some(symbol)).await?;
+        Ok(fee.result.list[0].maker_fee_rate.clone())
     }
 
     /// Sets the leverage for the given symbol.
@@ -114,23 +115,19 @@ impl Exchange for BybitClient {
     /// A `Result` containing a boolean indicating whether the leverage was
     /// successfully set.
     async fn set_leverage(&self, symbol: &str, leverage: u8) -> Self::LeverageOutput {
-        let account: PositionManager =
-            Bybit::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
-        let request_format = LeverageRequest {
+        let account =
+            PositionManager::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
+        let request = LeverageRequest {
             category: Category::Linear,
             symbol: Cow::Borrowed(symbol),
             leverage: leverage as i8,
         };
-        match account.set_leverage(request_format).await {
-            Ok(_) => {
-                let success_message = format!("Set leverage for {} to {}", symbol, leverage);
-                let _ = self.bot.send_message(&success_message).await;
-                Ok(true)
-            }
-            Err(e) => Err(e),
-        }
-    }
 
+        account.set_leverage(request).await?;
+        self.logger
+            .success(&format!("Set leverage for {} to {}", symbol, leverage));
+        Ok(true)
+    }
     /// Creates a new `Trader` instance with the given receive window.
     ///
     /// # Arguments
@@ -141,13 +138,12 @@ impl Exchange for BybitClient {
     ///
     /// A new `Trader` instance.
     fn trader(&self, recv_window: u16) -> Self::TraderOutput {
-        let config = { Config::default().set_recv_window(recv_window) };
-        let trader: Trader = Bybit::new_with_config(
+        let config = Config::default().set_recv_window(recv_window);
+        Bybit::new_with_config(
             &config,
             Some(self.api_key.clone()),
-            Some(self.api_key.clone()),
-        );
-        trader
+            Some(self.api_secret.clone()),
+        )
     }
 
     /// Places a new order on Bybit.
@@ -177,38 +173,13 @@ impl Exchange for BybitClient {
         is_buy: bool,
     ) -> Self::PlaceOrderOutput {
         let trader = self.trader(2500);
-        match tradere
-            .place_futures_limit_order(
-                bybit::model::Category::Linear,
-                symbol,
-                if is_buy {
-                    bybit::model::Side::Buy
-                } else {
-                    bybit::model::Side::Sell
-                },
-                qty,
-                price,
-                if is_buy { 1 } else { 2 },
-            )
-            .await
-        {
-            Ok(res) => {
-                let order_message = format!(
-                    "Order placed. Symbol: {}, Price: {}, Quantity: {}, Side: {} Order ID: {}",
-                    symbol,
-                    price,
-                    qty,
-                    if is_buy { "Buy" } else { "Sell" },
-                    res.result.order_id
-                );
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.success(&order_message))
-                    .await;
-                Ok(LiveOrder::new(res.result.order_id, price, qty))
-            }
-            Err(e) => Err(e),
-        }
+        let side = if is_buy { Side::Buy } else { Side::Sell };
+
+        let res = trader
+            .place_futures_limit_order(Category::Linear, symbol, side, qty, price, is_buy as u8 + 1)
+            .await?;
+
+        Ok(LiveOrder::new(res.result.order_id, price, qty))
     }
 
     /// Amends an existing order on Bybit.
@@ -245,20 +216,8 @@ impl Exchange for BybitClient {
             price: Some(price),
             ..Default::default()
         };
-        match trader.amend_order(request).await {
-            Ok(res) => {
-                let order_message = format!(
-                    "Order amended. Symbol: {}, Order ID: {}, Price: {}, Quantity: {}",
-                    symbol, order_id, price, qty
-                );
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.success(&order_message))
-                    .await;
-                Ok(LiveOrder::new(res.result.order_id, price, qty))
-            }
-            Err(e) => Err(e),
-        }
+        let amend = trader.amend_order(request).await?;
+        Ok(LiveOrder::new(amend.result.order_id, price, qty))
     }
 
     /// Cancels an existing order on Bybit.
@@ -285,20 +244,9 @@ impl Exchange for BybitClient {
             order_filter: None,
             order_link_id: None,
         };
-        match trader.cancel_order(request).await {
-            Ok(res) => {
-                let order_message = format!(
-                    "Order cancelled. Symbol: {}, Order ID: {}",
-                    symbol, order_id
-                );
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.success(&order_message))
-                    .await;
-                Ok(res.result)
-            }
-            Err(e) => Err(e),
-        }
+        let cancel = trader.cancel_order(request).await?;
+
+        Ok(cancel.result)
     }
 
     /// Cancels all open orders on Bybit.
@@ -321,17 +269,8 @@ impl Exchange for BybitClient {
             symbol,
             ..Default::default()
         };
-        match trader.cancel_all_orders(request).await {
-            Ok(res) => {
-                let order_message = format!("All orders cancelled. Symbol: {}", symbol);
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.success(&order_message))
-                    .await;
-                Ok(res.result.list)
-            }
-            Err(e) => Err(e),
-        }
+        let cancel_all = trader.cancel_all_orders(request).await?;
+        Ok(cancel_all.result.list)
     }
 
     /// Amends multiple orders on Bybit.
@@ -355,42 +294,29 @@ impl Exchange for BybitClient {
         let trader = self.trader(2500);
         let mut amends = Vec::with_capacity(10);
         let request = orders.clone().into_req();
-        match trader.batch_amend_order(request).await {
-            Ok(res) => {
-                for ((live_order, ext_info), orders) in res
-                    .result
-                    .list
-                    .iter()
-                    .zip(res.ret_ext_info.list.iter())
-                    .zip(orders)
-                {
-                    if ext_info.code == 0 && ext_info.msg == "OK" {
-                        let order_message = format!(
-                            "Order amended. Symbol: {}, Order ID: {}, Price: {}, Quantity: {}",
-                            live_order.symbol, live_order.order_id, orders.1, orders.2
-                        );
-                        amends.push(LiveOrder::new(
-                            live_order.order_id.clone(),
-                            orders.1,
-                            orders.2,
-                        ));
-                        let _ = self
-                            .bot
-                            .send_message(&self.logger.success(&order_message))
-                            .await;
-                    }
-                }
-                Ok(amends)
-            }
-            Err(e) => {
-                let error_message = format!("Order failed. Error: {}", e);
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.error(&error_message))
-                    .await;
-                Err(e)
+        let batch_amend = trader.batch_amend_order(request).await?;
+
+        for ((live_order, ext_info), order_req) in batch_amend
+            .result
+            .list
+            .iter()
+            .zip(batch_amend.ret_ext_info.list.iter())
+            .zip(orders)
+        {
+            if ext_info.code == 0 && ext_info.msg == "OK" {
+                let order_message = format!(
+                    "Order amended. Symbol: {}, Order ID: {}, Price: {}, Quantity: {}",
+                    live_order.symbol, live_order.order_id, order_req.1, order_req.2
+                );
+                amends.push(LiveOrder::new(
+                    live_order.order_id.clone(),
+                    order_req.1,
+                    order_req.2,
+                ));
+                self.logger.info(&order_message);
             }
         }
+        Ok(amends)
     }
 
     /// Places multiple orders on Bybit.
@@ -416,64 +342,32 @@ impl Exchange for BybitClient {
         let request = orders.clone().into_req();
         let mut live_sells = Vec::with_capacity(5);
         let mut live_buys = Vec::with_capacity(5);
-        match trader.batch_place_order(request).await {
-            Ok(res) => {
-                for ((live_order, ext_info), order_req) in res
-                    .result
-                    .list
-                    .iter()
-                    .zip(res.ret_ext_info.list.iter())
-                    .zip(orders)
-                {
-                    if ext_info.code == 0 && ext_info.msg == "OK" {
-                        let order_message = format!(
-                        "Order placed. Symbol: {}, Price: {}, Quantity: {}, Side: {}, Order ID: {}",
-                        live_order.symbol,
+        let batch_orders = trader.batch_place_order(request).await?;
+        for ((live_order, ext_info), order_req) in batch_orders
+            .result
+            .list
+            .iter()
+            .zip(batch_orders.ret_ext_info.list.iter())
+            .zip(orders)
+        {
+            if ext_info.code == 0 && ext_info.msg == "OK" {
+                if order_req.3 {
+                    live_buys.push(LiveOrder::new(
+                        live_order.order_id.clone(),
                         order_req.1,
                         order_req.2,
-                        if order_req.3 { "Buy" } else { "Sell" },
-                        live_order.order_id
-                    );
-                        if order_req.3 {
-                            live_buys.push(LiveOrder::new(
-                                live_order.order_id.clone(),
-                                order_req.1,
-                                order_req.2,
-                            ));
-                        } else {
-                            live_sells.push(LiveOrder::new(
-                                live_order.order_id.clone(),
-                                order_req.1,
-                                order_req.2,
-                            ));
-                        }
-                        let _ = self
-                            .bot
-                            .send_message(&self.logger.success(&order_message))
-                            .await;
-                    } else {
-                        // Handle failed orders
-                        let error_message = format!(
-                            "Order failed. Symbol: {}, Error: {} (Code: {})",
-                            live_order.symbol, ext_info.msg, ext_info.code
-                        );
-                        let _ = self
-                            .bot
-                            .send_message(&self.logger.error(&error_message))
-                            .await;
-                    }
+                    ));
+                } else {
+                    live_sells.push(LiveOrder::new(
+                        live_order.order_id.clone(),
+                        order_req.1,
+                        order_req.2,
+                    ));
                 }
-                Ok(vec![live_buys, live_sells])
-            }
-            Err(e) => {
-                let error_message = format!("Order failed. Error: {}", e);
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.error(&error_message))
-                    .await;
-                Err(e)
+            } else {
             }
         }
+        Ok(vec![live_buys, live_sells])
     }
 
     /// Retrieves symbol information from Bybit.
@@ -489,38 +383,21 @@ impl Exchange for BybitClient {
     ///
     /// If the request fails, the function will panic with the error message.
     async fn get_symbol_info(&self, symbol: &str) -> Self::SymbolInformationOutput {
-        let market_data: MarketData = Bybit::new(None, None);
+        let market_data = MarketData::new(None, None);
         let request = InstrumentRequest::new(Category::Linear, Some(symbol), None, None, None);
-        match market_data.get_futures_instrument_info(request).await {
-            Ok(res) => {
-                let data = SymbolInfo {
-                    tick_size: res.result.list[0].price_filter.tick_size,
-                    lot_size: if let Some(v) = &res.result.list[0].lot_size_filter.qty_step {
-                        v.parse::<f64>().unwrap_or(0.0)
-                    } else {
-                        0.0
-                    },
-                    min_notional: if let Some(v) =
-                        &res.result.list[0].lot_size_filter.min_notional_value
-                    {
-                        v.parse::<f64>().unwrap_or(0.0)
-                    } else {
-                        0.0
-                    },
-                    post_only_max: res.result.list[0].lot_size_filter.max_order_qty,
-                    min_qty: res.result.list[0].lot_size_filter.min_order_qty,
-                };
-                Ok(data)
-            }
-            Err(e) => {
-                let error_message = format!("Symbol info failed. Error: {}", e);
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.error(&error_message))
-                    .await;
-                Err(e)
-            }
-        }
+        let res = market_data.get_futures_instrument_info(request).await?;
+
+        let info = &res.result.list[0];
+        let parse_float =
+            |s: &Option<String>| s.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+
+        Ok(SymbolInfo {
+            tick_size: info.price_filter.tick_size,
+            lot_size: parse_float(&info.lot_size_filter.qty_step),
+            min_notional: parse_float(&info.lot_size_filter.min_notional_value),
+            post_only_max: info.lot_size_filter.max_order_qty,
+            min_qty: info.lot_size_filter.min_order_qty,
+        })
     }
     /// Subscribes to Bybit futures market data for the given symbols and sends
     /// it over the given sender channel.
@@ -545,115 +422,54 @@ impl Exchange for BybitClient {
         symbols: Vec<String>,
         sender: tokio::sync::mpsc::UnboundedSender<Self::StreamData>,
     ) {
-        let delay = 600;
         let market_stream: Stream = Bybit::new(None, None);
-        let category = Category::Linear;
-        let args = build_request(&symbols);
         let mut market_data = BybitMarket::default();
-        let request = Subscription::new("subscribe", args.iter().map(String::as_str).collect());
 
-        for k in symbols.clone() {
-            market_data.books.insert(k.clone(), BybitBook::new());
+        let init_futures = symbols.iter().map(|symbol| async {
+            let info = self.get_symbol_info(symbol).await.ok();
+            (symbol.clone(), info)
+        });
+
+        let results = futures::future::join_all(init_futures).await;
+
+        for (symbol, info) in results {
+            market_data.books.insert(symbol.clone(), BybitBook::new());
             market_data
                 .trades
-                .insert(k.clone(), VecDeque::with_capacity(1000));
-            market_data.ticker.insert(k, VecDeque::with_capacity(10));
-        }
-        for k in symbols {
-            if let Some(book) = market_data.books.get_mut(&k) {
-                match self.get_symbol_info(&k).await {
-                    Ok(res) => {
-                        book.tick_size = res.tick_size;
-                        book.lot_size = res.lot_size;
-                        book.min_notional = res.min_notional;
-                        book.post_only_max = res.post_only_max;
-                        book.min_qty = res.min_qty;
-                    }
-                    Err(e) => {
-                        let error_message = format!("Order failed. Error: {}", e);
-                        let _ = self
-                            .bot
-                            .send_message(&self.logger.error(&error_message))
-                            .await;
-                    }
-                }
-            }
-        }
-        let handler = move |event| {
-            match event {
-                WebsocketEvents::OrderBookEvent(OrderBookUpdate {
-                    topic,
-                    data,
-                    event_type,
-                    timestamp,
-                    cts,
-                }) => {
-                    let symbol = topic.split(".").nth(2).unwrap();
-                    let event_type_str = event_type.as_str();
-                    if let Some(book) = market_data.books.get_mut(symbol) {
-                        market_data.timestamp = timestamp;
-                        match event_type_str {
-                            "snapshot" => book.reset(data.asks, data.bids, timestamp, cts),
-                            "delta" => {
-                                if topic == format!("orderbook.1.{}", symbol) {
-                                    book.update_bba(data.asks, data.bids, timestamp, cts);
-                                } else if topic == format!("orderbook.50.{}", symbol) {
-                                    book.update(data.asks, data.bids, timestamp, 1);
-                                } else {
-                                    book.update(data.asks, data.bids, timestamp, 50);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                WebsocketEvents::TickerEvent(tick) => {
-                    let symbol = tick.topic.split('.').nth(1).unwrap();
-                    if let Some(ticker) = market_data.ticker.get_mut(symbol) {
-                        if ticker.len() == ticker.capacity()
-                            || (ticker.capacity() - ticker.len()) <= 1
-                        {
-                            for _ in 0..2 {
-                                ticker.pop_front();
-                            }
-                        }
-                        match tick.data {
-                            Tickers::Linear(data) => ticker.push_back(data),
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                WebsocketEvents::TradeEvent(data) => {
-                    let symbol = data.topic.split(".").nth(1).unwrap();
-                    if let Some(trades) = market_data.trades.get_mut(symbol) {
-                        if trades.len() == trades.capacity()
-                            || (trades.capacity() - trades.len()) <= data.data.len()
-                        {
-                            for _ in 0..data.data.len() {
-                                trades.pop_front();
-                            }
-                        }
-                        trades.extend(data.data);
-                    }
-                }
+                .insert(symbol.clone(), VecDeque::with_capacity(1000));
+            market_data
+                .ticker
+                .insert(symbol.clone(), VecDeque::with_capacity(10));
 
-                _ => {}
+            if let (Some(book), Some(info)) = (market_data.books.get_mut(&symbol), info) {
+                book.update_symbol_info(&info);
             }
+        }
+        let args = build_request(&symbols);
+        let request = Subscription::new("subscribe", args.iter().map(String::as_str).collect());
+
+        let handler = move |event| {
+            handle_websocket_event(&mut market_data, event);
             let _ = sender.send(market_data.clone());
             Ok(())
         };
 
+        let mut backoff = 600;
+
         loop {
             match market_stream
-                .ws_subscribe(request.clone(), category, handler.clone())
+                .ws_subscribe(request.clone(), Category::Linear, handler.clone())
                 .await
             {
                 Ok(_) => {
-                    println!("Subscribed to market stream");
+                    backoff = 600;
+                    self.logger.info("Subscribed to Bybit futures market data");
                 }
                 Err(e) => {
-                    let error_message = format!("Error: {}", e);
-                    let _ = self.bot.send_message(&error_message).await;
+                    let delay = backoff * 2;
+                    backoff = delay;
+                    let error_message = format!("Bybit_Market_Error: {}", e);
+                    self.logger.error(&error_message);
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
             }
@@ -681,7 +497,6 @@ impl Exchange for BybitClient {
         symbol: String,
         sender: tokio::sync::mpsc::UnboundedSender<Self::PrivateStreamData>,
     ) -> () {
-        let delay = 600;
         let user_stream: Stream = Bybit::new(
             Some(self.api_key.clone()),    // API key
             Some(self.api_secret.clone()), // Secret Key
@@ -700,73 +515,25 @@ impl Exchange for BybitClient {
             request_args.iter().map(String::as_str).collect(),
         );
         let handler = move |event| {
-            match event {
-                WebsocketEvents::Wallet(data) => {
-                    private_data.time = data.creation_time;
-                    if private_data.wallet.len() == private_data.wallet.capacity()
-                        || (private_data.wallet.capacity() - private_data.wallet.len())
-                            <= data.data.len()
-                    {
-                        for _ in 0..data.data.len() {
-                            private_data.wallet.pop_front();
-                        }
-                    }
-                    private_data.wallet.extend(data.data);
-                }
-                WebsocketEvents::PositionEvent(data) => {
-                    private_data.time = data.creation_time;
-                    if private_data.positions.len() == private_data.positions.capacity()
-                        || (private_data.positions.capacity() - private_data.positions.len())
-                            <= data.data.len()
-                    {
-                        for _ in 0..data.data.len() {
-                            private_data.positions.pop_front();
-                        }
-                    }
-                    private_data.positions.extend(data.data);
-                }
-                WebsocketEvents::FastExecEvent(data) => {
-                    private_data.time = data.creation_time;
-                    if private_data.executions.len() == private_data.executions.capacity()
-                        || (private_data.executions.capacity() - private_data.executions.len())
-                            <= data.data.len()
-                    {
-                        for _ in 0..data.data.len() {
-                            private_data.executions.pop_front();
-                        }
-                    }
-                    private_data.executions.extend(data.data);
-                }
-                WebsocketEvents::OrderEvent(data) => {
-                    private_data.time = data.creation_time;
-                    if private_data.orders.len() == private_data.orders.capacity()
-                        || (private_data.orders.capacity() - private_data.orders.len())
-                            <= data.data.len()
-                    {
-                        for _ in 0..data.data.len() {
-                            private_data.orders.pop_front();
-                        }
-                    }
-                    private_data.orders.extend(data.data);
-                }
-                _ => {
-                    eprintln!("Unhandled event: {:#?}", event);
-                }
-            }
+            handle_private_websocket_event(&mut private_data, event);
             let _ = sender.send((symbol.clone(), private_data.clone()));
             Ok(())
         };
+        let mut backoff = 600;
         loop {
             match user_stream
                 .ws_priv_subscribe(request.clone(), handler.clone())
                 .await
             {
                 Ok(_) => {
-                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    backoff = 600;
+                    self.logger.info("Subscribed to Bybit private stream data");
                 }
                 Err(e) => {
+                    let delay = backoff * 2;
+                    backoff = delay;
                     let error_message = format!("Error: {}", e);
-                    let _ = self.bot.send_message(&error_message).await;
+                    self.logger.error(&error_message);
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
             }
@@ -1551,38 +1318,198 @@ impl OrderBook for BybitBook {
     }
 }
 
-    /// Builds a list of Bybit subscriptions for the given symbols.
-    ///
-    /// The subscriptions that are built are:
-    ///
-    /// - Orderbook with 1, 50, and 200 levels for each symbol
-    /// - The ticker for each symbol
-    /// - The public trades for each symbol
-    ///
-    /// # Arguments
-    ///
-    /// * `symbol` - A vector of strings representing the symbols to subscribe to.
-    ///
-    /// # Returns
-    ///
-    /// A vector of strings representing the subscriptions to make.
-fn build_request(symbol: &[String]) -> Vec<String> {
-    let mut request_args = vec![];
-    let book_req: Vec<String> = symbol
-        .iter()
-        .flat_map(|s| vec![(1, s), (50, s), (200, s)])
-        .map(|(num, sym)| format!("orderbook.{}.{}", num, sym.to_uppercase()))
-        .collect();
-    request_args.extend(book_req);
-    let tickers_req: Vec<String> = symbol
-        .iter()
-        .map(|sub| format!("tickers.{}", sub.to_uppercase()))
-        .collect();
-    request_args.extend(tickers_req);
-    let trade_req: Vec<String> = symbol
-        .iter()
-        .map(|sub| format!("publicTrade.{}", sub.to_uppercase()))
-        .collect();
-    request_args.extend(trade_req);
-    request_args
+/// Builds a list of Bybit subscriptions for the given symbols.
+///
+/// The subscriptions that are built are:
+///
+/// - Orderbook with 1, 50, and 200 levels for each symbol
+/// - The ticker for each symbol
+/// - The public trades for each symbol
+///
+/// # Arguments
+///
+/// * `symbol` - A vector of strings representing the symbols to subscribe to.
+///
+/// # Returns
+///
+/// A vector of strings representing the subscriptions to make.
+fn build_request(symbols: &[String]) -> Vec<String> {
+    symbols
+        .into_iter()
+        .flat_map(|s| {
+            vec![
+                format!("orderbook.1.{s}"),
+                format!("orderbook.50.{s}"),
+                format!("orderbook.200.{s}"),
+                format!("tickers.{s}"),
+                format!("publicTrade.{s}"),
+            ]
+        })
+        .collect()
+}
+
+fn handle_websocket_event(market_data: &mut BybitMarket, event: WebsocketEvents) {
+    match event {
+        WebsocketEvents::OrderBookEvent(ob) => process_orderbook_event(market_data, ob),
+        WebsocketEvents::TickerEvent(ticker) => process_ticker_event(market_data, ticker),
+        WebsocketEvents::TradeEvent(data) => process_trade_update(market_data, data),
+        _ => (),
+    }
+}
+
+fn handle_private_websocket_event(private_data: &mut BybitPrivate, event: WebsocketEvents) {
+    match event {
+        WebsocketEvents::Wallet(data) => process_wallet_event(private_data, data),
+        WebsocketEvents::PositionEvent(data) => process_position_event(private_data, data),
+        WebsocketEvents::FastExecEvent(data) => process_execution_event(private_data, data),
+        WebsocketEvents::OrderEvent(data) => process_order_event(private_data, data),
+        _ => (),
+    }
+}
+
+/// Processes an order book event received from the Bybit WebSocket API and updates the
+/// `BybitMarket` struct accordingly.
+///
+/// The function takes a `BybitMarket` struct and an `OrderBookUpdate` struct as arguments.
+/// The `BybitMarket` struct is updated in-place with the new data. The `OrderBookUpdate`
+/// struct is used to get the symbol, timestamp, and order book data from the event.
+///
+/// The function checks if the event is a snapshot or a delta, and updates the order book
+/// accordingly. If the event is a snapshot, it resets the order book with the new data.
+/// If the event is a delta, it updates the order book with the new data, using the
+/// `update_bba` method if the depth is 1, or the `update` method if the depth is 50 or
+/// 200.
+///
+/// The function does nothing if the event is not an order book event, or if the symbol is
+/// not found in the `BybitMarket` struct.
+fn process_orderbook_event(market_data: &mut BybitMarket, ob: OrderBookUpdate) {
+    let symbol = ob.topic.split('.').nth(2).unwrap_or_default();
+
+    if let Some(book) = market_data.books.get_mut(symbol) {
+        market_data.timestamp = ob.timestamp;
+        match ob.event_type.as_str() {
+            "snapshot" => book.reset(
+                ob.data.asks.clone(),
+                ob.data.bids.clone(),
+                ob.timestamp,
+                ob.cts,
+            ),
+            "delta" => match ob.topic.split('.').nth(1) {
+                Some("1") => book.update_bba(
+                    ob.data.asks.clone(),
+                    ob.data.bids.clone(),
+                    ob.timestamp,
+                    ob.cts,
+                ),
+                Some("50") => {
+                    book.update(ob.data.asks.clone(), ob.data.bids.clone(), ob.timestamp, 1)
+                }
+                _ => book.update(ob.data.asks.clone(), ob.data.bids.clone(), ob.timestamp, 50),
+            },
+            _ => (),
+        }
+    }
+}
+
+/// Updates the ticker data for the given symbol in the market data.
+///
+/// The function processes ticker updates received from the Bybit WebSocket API
+/// and updates the `market_data` with the new ticker information. If the
+/// capacity of the ticker deque is reached or will be exceeded by the new
+/// data, the oldest ticker data is removed to accommodate the new one.
+///
+/// # Arguments
+///
+/// * `market_data` - A mutable reference to the `BybitMarket` struct that
+///   contains the current market data, including ticker data.
+/// * `tick` - A reference to the `WsTicker` struct that contains the new
+///   ticker information to be processed.
+fn process_ticker_event(market_data: &mut BybitMarket, tick: WsTicker) {
+    let symbol = tick.topic.split('.').nth(1).unwrap();
+    if let Some(ticker) = market_data.ticker.get_mut(symbol) {
+        if ticker.len() == ticker.capacity() || (ticker.capacity() - ticker.len()) <= 1 {
+            for _ in 0..2 {
+                ticker.pop_front();
+            }
+        }
+        match tick.data {
+            Tickers::Linear(data) => ticker.push_back(data),
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// Updates the trade data for the given symbol in the market data.
+///
+/// The function processes trade updates received from the Bybit WebSocket API
+/// and updates the `market_data` with the new trade information. If the
+/// capacity of the trades deque is reached or will be exceeded by the new
+/// data, the oldest trades are removed to accommodate the new ones.
+///
+/// # Arguments
+///
+/// * `market_data` - A mutable reference to the `BybitMarket` struct that
+///   contains the current market data, including trades.
+/// * `data` - A reference to the `TradeUpdate` struct that contains the new
+///   trade information to be processed.
+
+fn process_trade_update(market_data: &mut BybitMarket, data: TradeUpdate) {
+    let symbol = data.topic.split(".").nth(1).unwrap();
+    if let Some(trades) = market_data.trades.get_mut(symbol) {
+        if trades.len() == trades.capacity()
+            || (trades.capacity() - trades.len()) <= data.data.len()
+        {
+            for _ in 0..data.data.len() {
+                trades.pop_front();
+            }
+        }
+        trades.extend(data.data);
+    }
+}
+
+fn process_wallet_event(private_data: &mut BybitPrivate, data: WalletEvent) {
+    private_data.time = data.creation_time;
+    if private_data.wallet.len() == private_data.wallet.capacity()
+        || (private_data.wallet.capacity() - private_data.wallet.len()) <= data.data.len()
+    {
+        for _ in 0..data.data.len() {
+            private_data.wallet.pop_front();
+        }
+    }
+    private_data.wallet.extend(data.data);
+}
+
+fn process_position_event(private_data: &mut BybitPrivate, data: PositionEvent) {
+    private_data.time = data.creation_time;
+    if private_data.positions.len() == private_data.positions.capacity()
+        || (private_data.positions.capacity() - private_data.positions.len()) <= data.data.len()
+    {
+        for _ in 0..data.data.len() {
+            private_data.positions.pop_front();
+        }
+    }
+    private_data.positions.extend(data.data);
+}
+
+fn process_execution_event(private_data: &mut BybitPrivate, data: FastExecution) {
+    private_data.time = data.creation_time;
+    if private_data.executions.len() == private_data.executions.capacity()
+        || (private_data.executions.capacity() - private_data.executions.len()) <= data.data.len()
+    {
+        for _ in 0..data.data.len() {
+            private_data.executions.pop_front();
+        }
+    }
+    private_data.executions.extend(data.data);
+}
+fn process_order_event(private_data: &mut BybitPrivate, data: OrderEvent) {
+    private_data.time = data.creation_time;
+    if private_data.orders.len() == private_data.orders.capacity()
+        || (private_data.orders.capacity() - private_data.orders.len()) <= data.data.len()
+    {
+        for _ in 0..data.data.len() {
+            private_data.orders.pop_front();
+        }
+    }
+    private_data.orders.extend(data.data);
 }
