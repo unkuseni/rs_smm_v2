@@ -47,7 +47,7 @@ impl SharedState {
         }
     }
 
-    async fn load_binance(self, state_sender: mpsc::UnboundedSender<SharedState>) {
+    async fn load_binance(self, _state_sender: mpsc::UnboundedSender<SharedState>) {
         unimplemented!("Binance not implemented");
     }
 
@@ -68,7 +68,7 @@ impl SharedState {
         }
 
         tokio::spawn(async move {
-            let market_stream = BybitClient::init("".to_string(), "".to_string());
+            let market_stream = BybitClient::init("".to_string(), "".to_string()).await;
             market_stream
                 .market_subscribe(symbols, bybit_market_sender)
                 .await;
@@ -111,14 +111,14 @@ impl SharedState {
         }
 
         tokio::spawn(async move {
-            let market_stream = BybitClient::init("".to_string(), "".to_string());
+            let market_stream = BybitClient::init("".to_string(), "".to_string()).await;
             market_stream
                 .market_subscribe(bybit_symbols, bybit_market_sender)
                 .await;
         });
 
         tokio::spawn(async move {
-            let market_stream = BinanceClient::init("".to_string(), "".to_string());
+            let market_stream = BinanceClient::init("".to_string(), "".to_string()).await;
             market_stream
                 .market_subscribe(binance_symbols, binance_market_sender)
                 .await;
