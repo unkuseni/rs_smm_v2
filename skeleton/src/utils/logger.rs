@@ -17,7 +17,7 @@ impl Logger {
     }
 
     /// Returns the current date and time in a formatted tuple.
-    fn get_formatted_datetime() -> (String, u8, u8, u8, u8, String) {
+    fn get_formatted_datetime() -> (String, u8, u32, u32, u32, String) {
         let (month, day, _) = get_formatted_date();
         let (hours, mins, secs, is_pm) = get_formatted_time();
         let am_pm = if is_pm { "PM" } else { "AM" };
@@ -31,17 +31,19 @@ impl Logger {
             "{} {}, {:02}:{:02}:{:02} {} | {:<8} | {}",
             day, month, hours, mins, secs, am_pm, level, msg
         );
-        println!("{}", formatted_msg);
 
-        // Send the log message to Telegram asynchronously
+        // Clone necessary data for the async block
         let bot_clone = self.bot.clone();
         let msg_clone = formatted_msg.clone();
+
+        // Spawn the async task without awaiting it
         tokio::spawn(async move {
-            if let Err(e) = bot_clone.send_message(&msg_clone).await {
-                eprintln!("Failed to send log to Telegram: {}", e);
+            if let Err(err) = bot_clone.send_message(&msg_clone).await {
+                eprintln!("Failed to send message: {:?}", err);
             }
         });
 
+        println!("{}", formatted_msg);
         formatted_msg
     }
 
