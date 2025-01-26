@@ -11,7 +11,7 @@ use bybit::model::{
 use ordered_float::OrderedFloat;
 use serde::Deserialize;
 
-use super::{bot::LiveBot, logger::Logger};
+use super::logger::Logger;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Config {
@@ -33,14 +33,12 @@ pub struct BybitClient {
     pub api_key: String,
     pub api_secret: String,
     pub logger: Logger,
-    pub bot: LiveBot,
 }
 #[derive(Clone, Debug)]
 pub struct BinanceClient {
     pub api_key: String,
     pub api_secret: String,
     pub logger: Logger,
-    pub bot: LiveBot,
 }
 
 #[derive(Clone, Debug)]
@@ -94,6 +92,15 @@ pub struct BybitBook {
     pub min_notional: f64,
     pub min_qty: f64,
     pub post_only_max: f64,
+}
+impl BybitBook {
+    pub fn update_symbol_info(&mut self, info: &SymbolInfo) {
+        self.tick_size = info.tick_size;
+        self.lot_size = info.lot_size;
+        self.min_notional = info.min_notional;
+        self.post_only_max = info.post_only_max;
+        self.min_qty = info.min_qty;
+    }
 }
 
 /// symbol, price, qty, side
@@ -219,11 +226,11 @@ pub struct BinanceBook {
 
 #[derive(Debug, Clone)]
 pub struct SymbolInfo {
-  pub   tick_size: f64,
-  pub   lot_size: f64,
-  pub   min_notional: f64,
-  pub   min_qty: f64,
-  pub   post_only_max: f64,
+    pub tick_size: f64,
+    pub lot_size: f64,
+    pub min_notional: f64,
+    pub min_qty: f64,
+    pub post_only_max: f64,
 }
 
 #[derive(Clone, Debug)]
