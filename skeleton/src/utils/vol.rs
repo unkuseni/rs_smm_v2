@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+#[derive(Debug, Clone)]
 pub struct RollingVolatility {
     window_size: usize,
     returns: VecDeque<f64>,
