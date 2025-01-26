@@ -9,7 +9,6 @@ use std::{
 use binance::{
     api::Binance,
     config::Config,
-    errors::Error as BinanceError,
     futures::{
         account::FuturesAccount,
         general::FuturesGeneral,
@@ -34,22 +33,24 @@ use crate::utils::{
 
 use super::exchange::Exchange;
 
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
 impl Exchange for BinanceClient {
-    type TimeOutput = Result<u64, Box<dyn Error>>;
-    type FeeOutput = Result<f64, Box<dyn Error>>;
-    type LeverageOutput = Result<bool, Box<dyn Error>>;
+    type TimeOutput = Result<u64>;
+    type FeeOutput = Result<f64>;
+    type LeverageOutput = Result<bool>;
     type TraderOutput = FuturesAccount;
 
     type StreamData = BinanceMarket;
     type PrivateStreamData = ();
     type StreamOutput = ();
     type PrivateStreamOutput = ();
-    type PlaceOrderOutput = Result<LiveOrder, BinanceError>;
+    type PlaceOrderOutput = Result<LiveOrder>;
     type AmendOrderOutput = ();
-    type CancelOrderOutput = Result<CanceledOrder, BinanceError>;
-    type CancelAllOutput = Result<(), BinanceError>;
+    type CancelOrderOutput = Result<CanceledOrder>;
+    type CancelAllOutput = Result<()>;
     type BatchOrdersOutput = ();
-    type SymbolInformationOutput = Result<SymbolInfo, BinanceError>;
+    type SymbolInformationOutput = Result<SymbolInfo>;
     type BatchAmendsOutput = ();
 
     /// Initializes a new `BinanceClient` instance.
@@ -62,12 +63,12 @@ impl Exchange for BinanceClient {
     /// # Returns
     ///
     /// A new `BinanceClient` instance
-    fn init(api_key: String, api_secret: String) -> Self {
+    async fn init(api_key: String, api_secret: String) -> Self {
+        let bot = LiveBot::new("/config.toml").await.unwrap();
         Self {
             api_key,
             api_secret,
-            logger: Logger,
-            bot: LiveBot::new().unwrap(),
+            logger: Logger::new(bot),
         }
     }
 
@@ -78,13 +79,8 @@ impl Exchange for BinanceClient {
     /// The current server time in milliseconds as a `Result`.
     async fn time(&self) -> Self::TimeOutput {
         let general: FuturesGeneral = Binance::new(None, None);
-        let time = task::spawn_blocking(move || match general.get_server_time() {
-            Ok(res) => Ok(res.server_time),
-            Err(e) => Err(e),
-        })
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?; // Handle JoinError;
-        Ok(time?)
+        let time = task::spawn_blocking(move || general.get_server_time()).await?;
+        Ok(time.map(|t| t.server_time)?)
     }
 
     /// Gets the fee tier for the given symbol.
@@ -104,13 +100,8 @@ impl Exchange for BinanceClient {
     async fn fees(&self, _symbol: String) -> Self::FeeOutput {
         let account: FuturesAccount =
             Binance::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
-        let fees = task::spawn_blocking(move || match account.account_information() {
-            Ok(res) => Ok(res.fee_tier),
-            Err(e) => Err(e),
-        })
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?; // Handle JoinError;
-        Ok(fees?)
+        let fees = task::spawn_blocking(move || account.account_information()).await?;
+        Ok(fees.map(|f| f.fee_tier)?)
     }
 
     /// Sets the leverage for the given symbol.
@@ -133,21 +124,10 @@ impl Exchange for BinanceClient {
         let account: FuturesAccount =
             Binance::new(Some(self.api_key.clone()), Some(self.api_secret.clone()));
         let symbol_str = String::from(symbol);
-        let leverage = task::spawn_blocking(move || {
-            match account.change_initial_leverage(&symbol_str, leverage) {
-                Ok(res) => {
-                    if res.leverage == leverage {
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                }
-                Err(e) => Err(e),
-            }
-        })
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn Error>)?; // Handle JoinError;
-        Ok(leverage?)
+        let leverage =
+            task::spawn_blocking(move || account.change_initial_leverage(&symbol_str, leverage))
+                .await?;
+        Ok(leverage.is_ok())
     }
 
     /// Creates a new `FuturesAccount` instance with the given receive window.
@@ -192,73 +172,69 @@ impl Exchange for BinanceClient {
         let new_symbol = symbol.to_string();
         let order = task::spawn_blocking(move || {
             if is_buy {
-                match trader.limit_buy(
+                trader.limit_buy(
                     new_symbol,
                     qty,
                     price,
                     binance::futures::account::TimeInForce::GTC,
-                ) {
-                    Ok(res) => Ok(LiveOrder::new(
-                        res.order_id.to_string(),
-                        res.avg_price,
-                        res.orig_qty,
-                    )),
-                    Err(e) => Err(e),
-                }
+                )
             } else {
-                match trader.limit_sell(
+                trader.limit_sell(
                     new_symbol,
                     qty,
                     price,
                     binance::futures::account::TimeInForce::GTC,
-                ) {
-                    Ok(res) => Ok(LiveOrder::new(
-                        res.order_id.to_string(),
-                        res.avg_price,
-                        res.orig_qty,
-                    )),
-                    Err(e) => Err(e),
-                }
+                )
             }
         })
-        .await
-        .unwrap();
-        order
+        .await?;
+        let order = order?;
+        Ok(LiveOrder::new(
+            order.order_id.to_string(),
+            order.avg_price,
+            order.orig_qty,
+        ))
     }
+
+    /// Amends an existing order on Binance Futures.
+    ///
+    ///
+    /// - `order_id`: The ID of the order to amend.
+    /// - `price`: The new price to place the order at.
+    /// - `qty`: The new quantity of the order.
+    /// - `symbol`: The symbol of the market to amend the order in.
+    ///
+    /// # Returns
+    ///
+    /// A `LiveOrder` representing the amended order.
     async fn amend_order(
         &self,
-        order_id: &str,
-        price: f64,
-        qty: f64,
-        symbol: &str,
+        _order_id: &str,
+        _price: f64,
+        _qty: f64,
+        _symbol: &str,
     ) -> Self::AmendOrderOutput {
         unimplemented!();
     }
     async fn cancel_order(&self, order_id: &str, symbol: &str) -> Self::CancelOrderOutput {
         let trader = self.trader(2500);
         let (new_id, new_symbol) = (order_id.parse::<u64>().unwrap(), symbol.to_string());
-        let cancel = task::spawn_blocking(move || match trader.cancel_order(new_symbol, new_id) {
-            Ok(res) => Ok(res),
-            Err(e) => Err(e),
-        })
-        .await
-        .unwrap();
-        cancel
+        let cancel = task::spawn_blocking(move || trader.cancel_order(new_symbol, new_id)).await?;
+        Ok(cancel?)
     }
     async fn cancel_all(&self, symbol: &str) -> Self::CancelAllOutput {
         let trader = self.trader(2500);
         let new_symbol = symbol.to_string();
         let cancel =
-            task::spawn_blocking(move || match trader.cancel_all_open_orders(new_symbol) {
-                Ok(res) => Ok(res),
-                Err(e) => Err(e),
-            })
-            .await
-            .unwrap();
-        cancel
+            task::spawn_blocking(move || trader.cancel_all_open_orders(new_symbol)).await?;
+        Ok(cancel?)
     }
-    async fn batch_orders(&self, orders: Vec<BatchOrder>) -> Self::BatchOrdersOutput {}
-    async fn batch_amends(&self, orders: Vec<BatchAmend>) -> Self::BatchAmendsOutput {}
+    async fn batch_orders(&self, _orders: Vec<BatchOrder>) -> Self::BatchOrdersOutput {
+        unimplemented!();
+    }
+    async fn batch_amends(&self, _orders: Vec<BatchAmend>) -> Self::BatchAmendsOutput {
+        unimplemented!();
+    }
 
     /// Get the symbol information for a given symbol.
     ///
@@ -312,10 +288,7 @@ impl Exchange for BinanceClient {
             Ok(res) => Ok(res?),
             Err(e) => {
                 let error_message = format!("Order failed. Error: {}", e);
-                let _ = self
-                    .bot
-                    .send_message(&self.logger.error(&error_message))
-                    .await;
+                self.logger.error(&error_message);
                 panic!("Order failed. Error: {}", e)
             }
         }
@@ -429,10 +402,10 @@ impl Exchange for BinanceClient {
 
     async fn private_subscribe(
         &self,
-        symbol: String,
-        sender: tokio::sync::mpsc::UnboundedSender<Self::PrivateStreamOutput>,
+        _symbol: String,
+        _sender: tokio::sync::mpsc::UnboundedSender<Self::PrivateStreamOutput>,
     ) -> () {
-        let delay = 600;
+        unimplemented!();
     }
 }
 
@@ -688,7 +661,7 @@ impl OrderBook for BinanceBook {
     /// The mid price is calculated as the average of the best ask and best bid prices.
     ///
     /// This function is used to update the mid price when the order book is updated.
-    
+
     fn set_mid_price(&mut self) {
         self.mid_price = (self.best_ask.price + self.best_bid.price) / 2.0;
     }
@@ -1047,7 +1020,7 @@ impl OrderBook for BinanceBook {
     /// # Returns
     ///
     /// The order flow imbalance of the order book.
-        fn ofi(&self, old_book: &Self, depth: Option<usize>) -> f64 {
+    fn ofi(&self, old_book: &Self, depth: Option<usize>) -> f64 {
         let bid_ofi = {
             if self.best_bid.price > old_book.best_bid.price {
                 if let Some(depth) = depth {
@@ -1256,25 +1229,25 @@ impl BinanceMarket {
     }
 }
 
-    /// Builds a list of Binance streams to subscribe to.
-    ///
-    /// This function takes a slice of strings representing the symbols to subscribe to and
-    /// returns a vector of strings representing the Binance streams to subscribe to. The
-    /// streams are of the form `<symbol>@<stream>`, where `<symbol>` is the symbol and
-    /// `<stream>` is the stream name. The streams are:
-    ///
-    ///  - `aggTrade`: The aggregated trade stream.
-    ///  - `depth20@100ms`: The order book stream with 20 levels of depth, updated every 100ms.
-    ///  - `depth@100ms`: The order book stream with all levels of depth, updated every 100ms.
-    ///  - `bookTicker`: The order book ticker stream.
-    ///
-    /// # Arguments
-    ///
-    /// * `symbol` - The symbols to subscribe to.
-    ///
-    /// # Returns
-    ///
-    /// A vector of strings representing the Binance streams to subscribe to.
+/// Builds a list of Binance streams to subscribe to.
+///
+/// This function takes a slice of strings representing the symbols to subscribe to and
+/// returns a vector of strings representing the Binance streams to subscribe to. The
+/// streams are of the form `<symbol>@<stream>`, where `<symbol>` is the symbol and
+/// `<stream>` is the stream name. The streams are:
+///
+///  - `aggTrade`: The aggregated trade stream.
+///  - `depth20@100ms`: The order book stream with 20 levels of depth, updated every 100ms.
+///  - `depth@100ms`: The order book stream with all levels of depth, updated every 100ms.
+///  - `bookTicker`: The order book ticker stream.
+///
+/// # Arguments
+///
+/// * `symbol` - The symbols to subscribe to.
+///
+/// # Returns
+///
+/// A vector of strings representing the Binance streams to subscribe to.
 fn build_requests(symbol: &[String]) -> Vec<String> {
     let mut request_args = vec![];
 
