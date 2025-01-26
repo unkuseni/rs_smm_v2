@@ -64,18 +64,14 @@ pub fn avg_trade_price(
     old_trades: Option<&TradeType>,
     curr_trades: &TradeType,
     prev_avg: f64,
-    tick_window: usize,
 ) -> f64 {
+    // If no old_trades, compute VWAP of curr_trades directly
     let Some(old_trades) = old_trades else {
-        return mid_price;
+        return compute_vwap(curr_trades).unwrap_or(mid_price);
     };
-
-    // Precompute inverse tick
-    let inv_tick = 1.0 / tick_window as f64;
 
     match (old_trades, curr_trades) {
         (TradeType::Bybit(old_trades), TradeType::Bybit(curr_trades)) => {
-            // Calculate volumes and turnovers in one pass each
             let (old_volume, old_turnover) =
                 old_trades.iter().fold((0.0, 0.0), |(vol, turn), trade| {
                     (vol + trade.volume, turn + trade.volume * trade.price)
@@ -87,13 +83,12 @@ pub fn avg_trade_price(
                 });
 
             if old_volume != curr_volume {
-                ((curr_turnover - old_turnover) / (curr_volume - old_volume)) * inv_tick
+                (curr_turnover - old_turnover) / (curr_volume - old_volume)
             } else {
                 prev_avg
             }
         }
         (TradeType::Binance(old_trades), TradeType::Binance(curr_trades)) => {
-            // Pre-parse all values to avoid repeated parsing
             let (old_volume, old_turnover) = old_trades
                 .iter()
                 .filter_map(|trade| {
@@ -104,7 +99,6 @@ pub fn avg_trade_price(
                 .fold((0.0, 0.0), |(vol, turn), (qty, value)| {
                     (vol + qty, turn + value)
                 });
-
             let (curr_volume, curr_turnover) = curr_trades
                 .iter()
                 .filter_map(|trade| {
@@ -117,11 +111,44 @@ pub fn avg_trade_price(
                 });
 
             if old_volume != curr_volume {
-                ((curr_turnover - old_turnover) / (curr_volume - old_volume)) * inv_tick
+                (curr_turnover - old_turnover) / (curr_volume - old_volume)
             } else {
                 prev_avg
             }
         }
         _ => prev_avg,
+    }
+}
+
+/// Helper to compute VWAP when old_trades is None
+fn compute_vwap(trades: &TradeType) -> Option<f64> {
+    match trades {
+        TradeType::Bybit(trades) => {
+            let (volume, turnover) = trades.iter().fold((0.0, 0.0), |(vol, turn), trade| {
+                (vol + trade.volume, turn + trade.volume * trade.price)
+            });
+            if volume == 0.0 {
+                None
+            } else {
+                Some(turnover / volume)
+            }
+        }
+        TradeType::Binance(trades) => {
+            let (volume, turnover) = trades
+                .iter()
+                .filter_map(|trade| {
+                    let qty = trade.qty.parse::<f64>().ok()?;
+                    let price = trade.price.parse::<f64>().ok()?;
+                    Some((qty, qty * price))
+                })
+                .fold((0.0, 0.0), |(vol, turn), (qty, value)| {
+                    (vol + qty, turn + value)
+                });
+            if volume == 0.0 {
+                None
+            } else {
+                Some(turnover / volume)
+            }
+        }
     }
 }

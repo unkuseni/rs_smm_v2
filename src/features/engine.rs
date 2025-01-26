@@ -1,276 +1,315 @@
+use std::collections::VecDeque;
+
+use skeleton::{
+    exchange::exchange::TradeType,
+    utils::{localorderbook::OrderBook, vol::RollingVolatility},
+};
+
+use super::{
+    impact::{mid_price_avg, rate_of_change},
+    trade::{avg_trade_price, trade_imbalance},
+};
+
 #[derive(Debug, Clone)]
 pub struct Engine {
-    pub bba_imbalance: (f64, f64),
-    pub deep_imbalance: (Vec<f64>, Vec<f64>),
-    pub voi: (f64, f64),
-    pub ofi: (f64, f64),
-    pub trade_imbalance: (f64, f64),
-    pub price_impact: (f64, f64),
-    pub expected_return: (ExpectedReturn, ExpectedReturn),
-    pub rate_of_change: (ROC, ROC),
-    pub mid_price: MPB,
+    pub bba_imbalance: f64,
+    pub deep_imbalance: Vec<f64>,
+    pub voi: f64,
+    pub ofi: f64,
+    pub trade_imbalance: f64,
+    pub price_impact: f64,
+    pub volatility: RollingVolatility,
+    pub rate_of_change: ROC,
+    pub mpb: MPB,
     pub skew: f64,
+    pub tick_window: usize,
 }
 
 impl Engine {
     pub fn new(tick_window: usize) -> Self {
         Self {
-            bba_imbalance: (0.0, 0.0),
-            deep_imbalance: (Vec::new(), Vec::new()),
-            voi: (0.0, 0.0),
-            ofi: (0.0, 0.0),
-            trade_imbalance: (0.0, 0.0),
-            price_impact: (0.0, 0.0),
-            expected_return: (
-                ExpectedReturn::new(tick_window),
-                ExpectedReturn::new(tick_window),
-            ),
-            rate_of_change: (ROC::new(tick_window), ROC::new(tick_window)),
-            mid_price: MPB::new(tick_window),
+            bba_imbalance: 0.0,
+            deep_imbalance: Vec::new(),
+            voi: 0.0,
+            ofi: 0.0,
+            trade_imbalance: 0.0,
+            price_impact: 0.0,
+            volatility: RollingVolatility::new(tick_window),
+            rate_of_change: ROC::new(tick_window),
+            mpb: MPB::new(tick_window),
             skew: 0.0,
+            tick_window,
         }
     }
 
-    pub fn set_bba_imbalance(&mut self, imbalance: (f64, f64)) {
+    fn set_bba_imbalance(&mut self, imbalance: f64) {
         self.bba_imbalance = imbalance;
     }
 
-    pub fn get_bba_imbalance(&self) -> (f64, f64) {
+    pub fn get_bba_imbalance(&self) -> f64 {
         self.bba_imbalance
     }
 
-    pub fn set_deep_imbalance(&mut self, imbalance: (Vec<f64>, Vec<f64>)) {
+    fn set_deep_imbalance(&mut self, imbalance: Vec<f64>) {
         self.deep_imbalance = imbalance;
     }
 
-    pub fn get_deep_imbalance(&self) -> (Vec<f64>, Vec<f64>) {
+    pub fn get_deep_imbalance(&self) -> Vec<f64> {
         self.deep_imbalance.clone()
     }
 
-    pub fn set_voi(&mut self, voi: (f64, f64)) {
+    fn set_voi(&mut self, voi: f64) {
         self.voi = voi;
     }
 
-    pub fn get_voi(&self) -> (f64, f64) {
+    pub fn get_voi(&self) -> f64 {
         self.voi
     }
 
-    pub fn set_ofi(&mut self, ofi: (f64, f64)) {
+    fn set_ofi(&mut self, ofi: f64) {
         self.ofi = ofi;
     }
 
-    pub fn get_ofi(&self) -> (f64, f64) {
+    pub fn get_ofi(&self) -> f64 {
         self.ofi
     }
 
-    pub fn set_trade_imbalance(&mut self, imbalance: (f64, f64)) {
+    fn set_trade_imbalance(&mut self, imbalance: f64) {
         self.trade_imbalance = imbalance;
     }
 
-    pub fn get_trade_imbalance(&self) -> (f64, f64) {
+    pub fn get_trade_imbalance(&self) -> f64 {
         self.trade_imbalance
     }
 
-    pub fn set_price_impact(&mut self, impact: (f64, f64)) {
+    fn set_price_impact(&mut self, impact: f64) {
         self.price_impact = impact;
     }
 
-    pub fn get_price_impact(&self) -> (f64, f64) {
+    pub fn get_price_impact(&self) -> f64 {
         self.price_impact
     }
 
-    pub fn set_expected_return(&mut self, expected_return: (ExpectedReturn, ExpectedReturn)) {
-        self.expected_return = expected_return;
+    pub fn get_volatility(&self) -> RollingVolatility {
+        self.volatility.clone()
     }
 
-    pub fn get_expected_return(&self) -> (ExpectedReturn, ExpectedReturn) {
-        self.expected_return.clone()
-    }
-
-    pub fn set_rate_of_change(&mut self, rate_of_change: (ROC, ROC)) {
-        self.rate_of_change = rate_of_change;
-    }
-
-    pub fn get_rate_of_change(&self) -> (ROC, ROC) {
+    pub fn get_rate_of_change(&self) -> ROC {
         self.rate_of_change.clone()
     }
 
-    pub fn set_mid_price(&mut self, mid_price: MPB) {
-        self.mid_price = mid_price;
+    pub fn get_mpb(&self) -> MPB {
+        self.mpb.clone()
     }
 
-    pub fn get_mid_price(&self) -> MPB {
-        self.mid_price.clone()
+    pub fn update_engine<OB: OrderBook>(
+        &mut self,
+        current_book: OB,
+        previous_book: OB,
+        current_trades: &TradeType,
+        previous_trades: &TradeType,
+        prev_avg_trade_price: f64,
+        depth: Vec<usize>,
+    ) {
+        self.set_bba_imbalance(current_book.imbalance_ratio(None));
+
+        let deep_imbalance = depth[0..]
+            .iter()
+            .map(|x| current_book.imbalance_ratio(Some(*x)))
+            .collect();
+
+        self.set_deep_imbalance(deep_imbalance);
+
+        let voi = current_book.voi(&previous_book, None);
+
+        self.set_voi(voi);
+
+        let ofi = current_book.ofi(&previous_book, None);
+
+        self.set_ofi(ofi);
+
+        self.set_trade_imbalance(trade_imbalance(current_trades));
+
+        let impact = current_book.price_impact(&previous_book, None);
+        self.set_price_impact(impact);
+
+        self.volatility.update(current_book.get_mid_price());
+
+        self.rate_of_change.update(rate_of_change(
+            previous_book.get_mid_price(),
+            current_book.get_mid_price(),
+        ));
+
+        let avg_trade_price = avg_trade_price(
+            current_book.get_mid_price(),
+            Some(previous_trades),
+            current_trades,
+            prev_avg_trade_price,
+        );
+        self.mpb.update_basis(
+            avg_trade_price
+                - mid_price_avg(previous_book.get_mid_price(), current_book.get_mid_price()),
+        );
     }
 
-    pub fn generate_skew(&mut self) {}
+    pub fn generate_skew(&mut self) {
+        self.skew = 0.0;
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ROC {
-    pub current_rate_of_change: f64,
-    pub rate_of_change: Vec<f64>,
+    window_size: usize,
+    values: VecDeque<f64>,
+    sum: f64,
+    sum_squares: f64,
 }
 
 impl ROC {
-    pub fn new(tick_window: usize) -> Self {
+    /// Creates a new ROC calculator with guaranteed minimum window size of 2
+    pub fn new(window_size: usize) -> Self {
+        let window_size = window_size.max(2); // Need at least 2 values for meaningful z-score
         Self {
-            current_rate_of_change: 0.0,
-            rate_of_change: Vec::with_capacity(tick_window),
+            window_size,
+            values: VecDeque::with_capacity(window_size),
+            sum: 0.0,
+            sum_squares: 0.0,
         }
     }
 
-    pub fn set_current_rate_of_change(&mut self) {
-        if let Some(last) = self.rate_of_change.last() {
-            self.current_rate_of_change = *last;
+    /// Updates the ROC with a new value in O(1) time
+    pub fn update(&mut self, new_value: f64) {
+        // Maintain sliding window invariant
+        if self.values.len() == self.window_size {
+            if let Some(old_value) = self.values.pop_front() {
+                self.sum -= old_value;
+                self.sum_squares -= old_value.powi(2);
+            }
+        }
+        self.values.push_back(new_value);
+        self.sum += new_value;
+        self.sum_squares += new_value.powi(2);
+    }
+
+    /// Gets current rate of change in O(1) time
+    pub fn current(&self) -> f64 {
+        self.values.back().copied().unwrap_or(0.0)
+    }
+
+    /// Calculates mean ROC in O(1) time
+    pub fn mean(&self) -> f64 {
+        if self.values.is_empty() {
+            0.0
         } else {
-            self.current_rate_of_change = 0.0;
+            self.sum / self.values.len() as f64
         }
     }
 
-    pub fn update_rate_of_change(&mut self, rate_of_change: f64) {
-        if self.rate_of_change.len() == self.rate_of_change.capacity() {
-            self.rate_of_change.remove(0);
-        }
-        self.rate_of_change.push(rate_of_change);
-    }
-
-    pub fn get_mean_roc(&self) -> f64 {
-        self.rate_of_change.iter().sum::<f64>() / self.rate_of_change.len() as f64
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ExpectedReturn {
-    pub same_expected_return: f64,
-    pub cross_expected_return: f64,
-    pub cross_return_array: Vec<f64>,
-    pub same_return_array: Vec<f64>,
-}
-
-impl ExpectedReturn {
-    pub fn new(tick_window: usize) -> Self {
-        Self {
-            same_expected_return: 0.0,
-            cross_expected_return: 0.0,
-            cross_return_array: Vec::with_capacity(tick_window),
-            same_return_array: Vec::with_capacity(tick_window),
-        }
-    }
-
-    pub fn set_same_expected_return(&mut self, same_expected_return: f64) {
-        self.same_expected_return = same_expected_return;
-        if self.same_return_array.len() == self.same_return_array.capacity() {
-            self.same_return_array.remove(0);
-        }
-        self.same_return_array.push(same_expected_return);
-    }
-
-    pub fn get_same_expected_return(&self) -> f64 {
-        self.same_expected_return
-    }
-
-    pub fn set_cross_expected_return(&mut self, cross_expected_return: f64) {
-        self.cross_expected_return = cross_expected_return;
-        if self.cross_return_array.len() == self.cross_return_array.capacity() {
-            self.cross_return_array.remove(0);
-        }
-        self.cross_return_array.push(cross_expected_return);
-    }
-
-    pub fn get_cross_expected_return(&self) -> f64 {
-        self.cross_expected_return
-    }
-
-    pub fn get_mean_cross_return(&self) -> f64 {
-        if self.cross_return_array.is_empty() {
+    /// Calculates population standard deviation in O(1) time
+    pub fn std_dev(&self) -> f64 {
+        if self.values.len() < 2 {
             return 0.0;
         }
-        self.cross_return_array.iter().sum::<f64>() / self.cross_return_array.len() as f64
+
+        let n = self.values.len() as f64;
+        let mean = self.mean();
+        let variance = (self.sum_squares / n) - mean.powi(2);
+
+        variance.max(0.0).sqrt() // Prevent negative variance from floating point errors
+    }
+    /// Calculates Z-score for current value in O(1) time
+    pub fn z_score(&self) -> f64 {
+        let current = self.current();
+        let mean = self.mean();
+        let std_dev = self.std_dev();
+
+        if std_dev == 0.0 {
+            0.0
+        } else {
+            (current - mean) / std_dev
+        }
     }
 
-    pub fn get_mean_same_return(&self) -> f64 {
-        if self.same_return_array.is_empty() {
-            return 0.0;
-        }
-        self.same_return_array.iter().sum::<f64>() / self.same_return_array.len() as f64
-    }
-
-    pub fn get_same_vol(&self) -> f64 {
-        if self.same_return_array.len() <= 1 {
-            return 0.0;
-        }
-        let mean_return = self.get_mean_same_return();
-        let variance = self
-            .same_return_array
-            .iter()
-            .map(|x| (x - mean_return).powi(2))
-            .sum::<f64>()
-            / (self.same_return_array.len() - 1) as f64;
-        variance.sqrt()
-    }
-
-    pub fn get_cross_vol(&self) -> f64 {
-        if self.cross_return_array.len() <= 1 {
-            return 0.0;
-        }
-        let mean_return = self.get_mean_cross_return();
-        let variance = self
-            .cross_return_array
-            .iter()
-            .map(|x| (x - mean_return).powi(2))
-            .sum::<f64>()
-            / (self.cross_return_array.len() - 1) as f64;
-        variance.sqrt()
+    /// Gets full history slice for advanced analysis
+    pub fn history(&self) -> Vec<f64> {
+        let mut values = self.values.clone();
+        values.make_contiguous();
+        values.into()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct MPB {
-    pub mid_price_basis: f64,
-    pub mean_basis: f64,
-    pub basis_array: Vec<f64>,
+    mid_price_basis: f64,
+    basis_array: VecDeque<f64>,
+    sum: f64,
+    sum_squares: f64,
 }
 
 impl MPB {
     pub fn new(tick_window: usize) -> Self {
         Self {
             mid_price_basis: 0.0,
-            mean_basis: 0.0,
-            basis_array: Vec::with_capacity(tick_window),
+            basis_array: VecDeque::with_capacity(tick_window),
+            sum: 0.0,
+            sum_squares: 0.0,
         }
     }
 
-    pub fn set_mid_price_basis(&mut self, mid_price_basis: f64) {
-        self.mid_price_basis = mid_price_basis;
+    pub fn update_basis(&mut self, new_basis: f64) {
+        // Maintain sliding window
         if self.basis_array.len() == self.basis_array.capacity() {
-            self.basis_array.remove(0);
+            if let Some(old_value) = self.basis_array.pop_front() {
+                self.sum -= old_value;
+                self.sum_squares -= old_value.powi(2);
+            }
         }
-        self.basis_array.push(mid_price_basis);
+
+        self.basis_array.push_back(new_basis);
+        self.sum += new_basis;
+        self.sum_squares += new_basis.powi(2);
+        self.mid_price_basis = new_basis;
     }
 
-    pub fn get_mid_price_basis(&self) -> f64 {
+    // Get current basis value
+    pub fn current_basis(&self) -> f64 {
         self.mid_price_basis
     }
 
-    pub fn get_mean_basis(&self) -> f64 {
+    // Calculate mean in O(1) time
+    pub fn mean(&self) -> f64 {
         if self.basis_array.is_empty() {
-            return 0.0;
+            0.0
+        } else {
+            self.sum / self.basis_array.len() as f64
         }
-        self.basis_array.iter().sum::<f64>() / self.basis_array.len() as f64
     }
 
-    pub fn get_volatility(&self) -> f64 {
-        if self.basis_array.len() <= 1 {
+    // Calculate population standard deviation in O(1) time
+    pub fn std_dev(&self) -> f64 {
+        if self.basis_array.len() < 2 {
             return 0.0;
         }
-        let mean_basis = self.get_mean_basis();
-        let variance = self
-            .basis_array
-            .iter()
-            .map(|x| (x - mean_basis).powi(2))
-            .sum::<f64>()
-            / (self.basis_array.len() - 1) as f64;
-        variance.sqrt()
+
+        let n = self.basis_array.len() as f64;
+        let mean = self.mean();
+        let variance = (self.sum_squares / n) - mean.powi(2);
+
+        variance.max(0.0).sqrt()
+    }
+
+    // Calculate Z-score for current basis
+    pub fn z_score(&self) -> f64 {
+        let std_dev = self.std_dev();
+        if std_dev == 0.0 {
+            0.0
+        } else {
+            (self.mid_price_basis - self.mean()) / std_dev
+        }
+    }
+
+    // Get full history for external analysis
+    pub fn history(&self) -> &VecDeque<f64> {
+        &self.basis_array
     }
 }
