@@ -1427,12 +1427,17 @@ fn process_orderbook_event(market_data: &mut BybitMarket, ob: OrderBookUpdate) {
 fn process_ticker_event(market_data: &mut BybitMarket, tick: WsTicker) {
     let symbol = tick.topic.split('.').nth(1).unwrap();
     if let Some(ticker) = market_data.ticker.get_mut(symbol) {
-        if ticker.len() == ticker.capacity() || (ticker.capacity() - ticker.len()) <= 1 {
-            ticker.pop_front();
+        let new_data_len = 1;
+        let overflow = (ticker.len() + new_data_len).saturating_sub(3);
+        if overflow > 0 {
+            ticker.drain(0..overflow);
         }
         match tick.data {
             Tickers::Linear(data) => ticker.push_back(data),
             _ => unreachable!(),
+        }
+        if ticker.len() > 3 {
+            ticker.pop_front();
         }
     }
 }
@@ -1452,60 +1457,79 @@ fn process_ticker_event(market_data: &mut BybitMarket, tick: WsTicker) {
 ///   trade information to be processed.
 
 fn process_trade_update(market_data: &mut BybitMarket, data: TradeUpdate) {
-    let symbol = data.topic.split(".").nth(1).unwrap();
+    let symbol = data.topic.split('.').nth(1).unwrap();
     if let Some(trades) = market_data.trades.get_mut(symbol) {
-        if trades.len() == trades.capacity()
-            || (trades.capacity() - trades.len()) <= data.data.len()
-        {
-        trades.drain(..data.data.len());
+        let new_data_len = data.data.len();
+
+        // Calculate how many elements to remove to stay within MAX_TRADES
+        let overflow = (trades.len() + new_data_len).saturating_sub(1000);
+        if overflow > 0 {
+            // Remove oldest elements (front of the deque)
+            trades.drain(0..overflow);
         }
+
+        // Add new elements to the end
         trades.extend(data.data);
+
+        // Ensure MAX_TRADES is enforced (in case of edge cases)
+        if trades.len() > 1000 {
+            trades.truncate(1000);
+        }
     }
 }
 
 fn process_wallet_event(private_data: &mut BybitPrivate, data: WalletEvent) {
     private_data.time = data.creation_time;
-    if private_data.wallet.len() == private_data.wallet.capacity()
-        || (private_data.wallet.capacity() - private_data.wallet.len()) <= data.data.len()
-    {
-        for _ in 0..data.data.len() {
-            private_data.wallet.pop_front();
-        }
+
+    let new_data_len = data.data.len();
+    let overflow = (private_data.wallet.len() + new_data_len).saturating_sub(20);
+    if overflow > 0 {
+        private_data.wallet.drain(0..overflow);
     }
     private_data.wallet.extend(data.data);
+
+    // Ensure MAX_TRADES is enforced (in case of edge cases)
+    if private_data.wallet.len() > 20 {
+        private_data.wallet.truncate(20);
+    }
 }
 
 fn process_position_event(private_data: &mut BybitPrivate, data: PositionEvent) {
     private_data.time = data.creation_time;
-    if private_data.positions.len() == private_data.positions.capacity()
-        || (private_data.positions.capacity() - private_data.positions.len()) <= data.data.len()
-    {
-        for _ in 0..data.data.len() {
-            private_data.positions.pop_front();
-        }
+    let new_data_len = data.data.len();
+    let overflow = (private_data.positions.len() + new_data_len).saturating_sub(500);
+    if overflow > 0 {
+        private_data.positions.drain(0..overflow);
     }
+
     private_data.positions.extend(data.data);
+
+    // Ensure MAX_TRADES is enforced (in case of edge cases)
+    if private_data.positions.len() > 500 {
+        private_data.positions.truncate(500);
+    }
 }
 
 fn process_execution_event(private_data: &mut BybitPrivate, data: FastExecution) {
     private_data.time = data.creation_time;
-    if private_data.executions.len() == private_data.executions.capacity()
-        || (private_data.executions.capacity() - private_data.executions.len()) <= data.data.len()
-    {
-        for _ in 0..data.data.len() {
-            private_data.executions.pop_front();
-        }
+    let new_data_len = data.data.len();
+    let overflow = (private_data.executions.len() + new_data_len).saturating_sub(500);
+    if overflow > 0 {
+        private_data.executions.drain(0..overflow);
     }
     private_data.executions.extend(data.data);
+
+    // Ensure MAX_TRADES is enforced (in case of edge cases)
+    if private_data.executions.len() > 500 {
+        private_data.executions.truncate(500);
+    }
 }
 fn process_order_event(private_data: &mut BybitPrivate, data: OrderEvent) {
     private_data.time = data.creation_time;
-    if private_data.orders.len() == private_data.orders.capacity()
-        || (private_data.orders.capacity() - private_data.orders.len()) <= data.data.len()
-    {
-        for _ in 0..data.data.len() {
-            private_data.orders.pop_front();
-        }
+    let new_data_len = data.data.len();
+    let overflow = (private_data.orders.len() + new_data_len).saturating_sub(500);
+    if overflow > 0 {
+        private_data.orders.drain(0..overflow);
     }
     private_data.orders.extend(data.data);
 }
