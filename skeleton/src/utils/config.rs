@@ -1,4 +1,3 @@
-
 use notify::{Event, RecommendedWatcher, Watcher};
 use serde::de::DeserializeOwned;
 use std::{error::Error, path::Path, time::Duration};
@@ -7,16 +6,17 @@ use tokio::{fs, sync::mpsc};
 use tracing::{error, info};
 
 /// Async config reader with efficient error handling
-pub async fn read_toml<T: AsRef<Path>, U: DeserializeOwned>(path: T) -> Result<U, Box<dyn Error>> {
-    let contents = fs::read_to_string(path).await?;
-    toml::from_str(&contents).map_err(|e| e.into())
-}
+use anyhow::Result;
 
+pub async fn read_toml<T: AsRef<Path>, U: DeserializeOwned>(path: T) -> Result<U> {
+    let contents = fs::read_to_string(path).await?;
+    toml::from_str(&contents).map_err(Into::into)
+}
 /// Debounced file watcher with zero-copy parsing
 pub async fn watch_config<T, U>(
     path: T,
     sender: mpsc::Sender<U>,
-) -> Result<(), Box<dyn Error>>
+) -> Result<(), Box<dyn Error + Send>>
 where
     T: AsRef<Path> + Send + 'static,
     U: DeserializeOwned + Send + 'static,
@@ -25,7 +25,7 @@ where
 
     // Initial load with backoff retry
     let config = read_toml(&path).await?;
-    sender.send(config).await?;
+    let _ = sender.send(config).await.map_err(|e| Box::new(e));
 
     // File watcher with event filtering
     let (debounce_tx, mut debounce_rx) = mpsc::channel(4);
@@ -40,9 +40,12 @@ where
         notify::Config::default()
             .with_poll_interval(Duration::from_secs(1))
             .with_compare_contents(true),
-    )?;
+    )
+    .map_err(|e| Box::new(e) as Box<dyn Error + Send>)?; // Convert notify::Error
 
-    watcher.watch(&path, notify::RecursiveMode::NonRecursive)?;
+    watcher
+        .watch(&path, notify::RecursiveMode::NonRecursive)
+        .map_err(|e| Box::new(e) as Box<dyn Error + Send>)?; // Convert notify::Error
 
     // Efficient debounce loop
     let mut debounce_timer = tokio::time::interval(Duration::from_millis(500));
@@ -54,7 +57,7 @@ where
                 match read_toml(&path).await {
                     Ok(new_config) => {
                         config_version += 1;
-                        sender.send(new_config).await?;
+                    let _ = sender.send(new_config).await.map_err(|e| Box::new(e));
                         info!("Config reloaded (v{})", config_version);
                     }
                     Err(e) => error!("Config reload failed: {}", e),
