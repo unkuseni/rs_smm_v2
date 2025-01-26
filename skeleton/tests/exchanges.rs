@@ -13,7 +13,7 @@ mod tests {
     async fn test_bybit_market() {
         let api_key: String = String::from("");
         let api_secret: String = String::from("");
-        let client = BybitClient::init(api_key, api_secret);
+        let client = BybitClient::init(api_key, api_secret).await;
         let (sender, mut receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             client
@@ -42,7 +42,7 @@ mod tests {
     async fn test_binance_market() {
         let api_key: String = String::from("");
         let api_secret: String = String::from("");
-        let client = BinanceClient::init(api_key, api_secret);
+        let client = BinanceClient::init(api_key, api_secret).await;
         let (sender, mut receiver) = mpsc::unbounded_channel::<BinanceMarket>();
         let sender_clone = sender.clone();
         tokio::spawn(async move {
@@ -71,7 +71,7 @@ mod tests {
     async fn test_bybit_private() {
         let api_key: String = String::from("");
         let api_secret: String = String::from("");
-        let client = BybitClient::init(api_key, api_secret);
+        let client = BybitClient::init(api_key, api_secret).await;
         let (sender, mut receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             client
@@ -91,7 +91,7 @@ mod tests {
         let mut ss = SharedState::new("bybit".to_string());
         ss.add_clients(
             "DOGSUSDT".to_string(),
-            BybitClient::init("".to_string(), "".to_string()),
+            BybitClient::init("".to_string(), "".to_string()).await,
         );
         let (sender, mut receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move {
