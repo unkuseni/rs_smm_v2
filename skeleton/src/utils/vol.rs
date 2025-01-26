@@ -20,8 +20,8 @@ impl RollingVolatility {
         }
     }
 
-    /// Update with new price and return current volatility if available
-    pub fn update(&mut self, price: f64) -> Option<f64> {
+    /// Update with new price and return current volatility and Z-score if available
+    pub fn update(&mut self, price: f64) -> Option<(f64, f64)> {
         if let Some(prev_price) = self.last_price.replace(price) {
             // Calculate log return: ln(price/prev_price)
             let ret = (price / prev_price).ln();
@@ -39,9 +39,23 @@ impl RollingVolatility {
             self.sum_squares += ret.powi(2);
         }
 
-        // Only calculate volatility when window is filled
+        // Only calculate volatility and Z-score when window has enough data
         if self.returns.len() >= 2 {
-            Some(self.calculate_volatility())
+            let n = self.returns.len() as f64;
+            let mean = self.sum / n;
+            let vol = self.calculate_volatility();
+
+            // Safely unwrap because we have at least 2 returns
+            let latest_ret = *self.returns.back().unwrap();
+            
+            // Handle division by zero if volatility is 0
+            let z_score = if vol == 0.0 {
+                0.0
+            } else {
+                (latest_ret - mean) / vol
+            };
+
+            Some((vol, z_score))
         } else {
             None
         }
@@ -52,9 +66,7 @@ impl RollingVolatility {
         let n = self.returns.len() as f64;
         let mean = self.sum / n;
         let variance = (self.sum_squares / n) - mean.powi(2);
-
-        // Return standard deviation (volatility)
-        variance.sqrt().max(0.0)
+        variance.sqrt().max(0.0) // Ensure non-negative
     }
 
     /// Get current number of observations in window
