@@ -1,10 +1,9 @@
-use std::{collections::VecDeque, future::Future};
 use binance::model::AggrTradesEvent;
 use bybit::model::WsTrade;
+use std::{collections::VecDeque, future::Future};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::utils::models::{BatchAmend, BatchOrder, BinanceMarket, BybitMarket};
-
 
 pub trait Exchange {
     type TimeOutput;
@@ -23,7 +22,7 @@ pub trait Exchange {
     type BatchAmendsOutput;
     type SymbolInformationOutput;
 
-    fn init(api_key: String, api_secret: String) -> Self;
+    fn init(api_key: String, api_secret: String) -> impl Future<Output = Self>;
     fn time(&self) -> impl Future<Output = Self::TimeOutput>;
     fn fees(&self, symbol: String) -> impl Future<Output = Self::FeeOutput>;
     fn set_leverage(
@@ -78,7 +77,6 @@ pub enum MarketData {
     Bybit(BybitMarket),
     Binance(BinanceMarket),
 }
-
 
 pub enum TradeType {
     Bybit(VecDeque<WsTrade>),
