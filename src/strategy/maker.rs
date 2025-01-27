@@ -1,5 +1,5 @@
 use skeleton::{
-    exchange::exchange::{MarketData, TradeType},
+    exchange::exchange::{Exchange, MarketData, TradeType},
     ss::SharedState,
     utils::models::{BybitBook, BybitClient, BybitPrivate},
 };
@@ -126,6 +126,7 @@ impl Maker {
     ) -> HashMap<String, QuoteGenerator> {
         let mut generators = HashMap::new();
         for (symbol, client) in clients {
+            let _ = client.set_leverage(symbol.as_str(), leverage as u8).await;
             generators.insert(
                 symbol.clone(),
                 QuoteGenerator::new(
