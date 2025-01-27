@@ -16,7 +16,7 @@ const DEFAULT_BPS: f64 = 25.0;
 const VOLATILITY_MULTIPLIER: f64 = 10.0;
 const MAX_SPREAD_MULTIPLIER: f64 = 3.7;
 const INVENTORY_ADJUSTMENT: f64 = -0.63;
-const MAX_UPDATE_TIME_MS: u64 = 180_000;
+
 const MIN_CANCEL_LIMIT: usize = 1;
 const ORDER_CHUNK_SIZE: usize = 10;
 
@@ -323,7 +323,7 @@ impl QuoteGenerator {
         let current_ask_bound = self.last_update_price + bounds;
 
         let bounds_violated = !(current_bid_bound..=current_ask_bound).contains(&book.mid_price);
-        let stale_data = (book.last_update - self.time_limit) > MAX_UPDATE_TIME_MS;
+        let stale_data = (book.last_update - self.time_limit) > (self.tick_window * 1000) as u64;
         let fill_detected = self.check_for_fills(&private);
         self.set_inventory_delta(book.get_mid_price());
 
