@@ -1532,4 +1532,9 @@ fn process_order_event(private_data: &mut BybitPrivate, data: OrderEvent) {
         private_data.orders.drain(0..overflow);
     }
     private_data.orders.extend(data.data);
+
+    // Ensure MAX_TRADES is enforced (in case of edge cases)
+    if private_data.orders.len() > 500 {
+        private_data.orders.truncate(500);
+    }
 }
