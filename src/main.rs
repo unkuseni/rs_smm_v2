@@ -1,21 +1,16 @@
-use std::{collections::HashMap, time::Duration};
+use std::collections::HashMap;
 
 use rs_smm_v2::{params::params::use_toml, strategy::maker::Maker};
 use skeleton::{
-    exchange::exchange::{Exchange, MarketData},
-    ss::{self, SharedState},
-    utils::{
-        localorderbook::OrderBook,
-        models::{BybitClient, Config},
-    },
+    exchange::exchange::Exchange,
+    ss,
+    utils::models::{BybitClient, Config},
 };
 use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() {
     let Config {
-        token,
-        chat_id,
         api_keys,
         balances,
         leverage,
@@ -24,6 +19,7 @@ async fn main() {
         rate_limit,
         tick_window,
         bps,
+        ..
     } = use_toml().await;
 
     let mut state = ss::SharedState::new("bybit".to_string());
