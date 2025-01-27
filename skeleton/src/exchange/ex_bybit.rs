@@ -50,7 +50,7 @@ impl Exchange for BybitClient {
     type AmendOrderOutput = Result<LiveOrder>;
     type CancelOrderOutput = Result<OrderStatus>;
     type CancelAllOutput = Result<Vec<OrderStatus>>;
-    type BatchOrdersOutput = Result<Vec<Vec<LiveOrder>>>;
+    type BatchOrdersOutput = Result<(Vec<LiveOrder>, Vec<LiveOrder>)>;
     type BatchAmendsOutput = Result<Vec<LiveOrder>>;
     type SymbolInformationOutput = Result<SymbolInfo>;
     /// Initializes a new `BybitClient` instance.
@@ -367,7 +367,7 @@ impl Exchange for BybitClient {
             } else {
             }
         }
-        Ok(vec![live_buys, live_sells])
+        Ok((live_buys, live_sells))
     }
 
     /// Retrieves symbol information from Bybit.
