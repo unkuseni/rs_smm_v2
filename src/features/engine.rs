@@ -2,16 +2,16 @@ use std::collections::VecDeque;
 
 use skeleton::{
     exchange::exchange::TradeType,
-    utils::{localorderbook::OrderBook, vol::RollingVolatility},
+    utils::{localorderbook::OrderBook, models::BybitBook, vol::RollingVolatility},
 };
 
 use super::{
     impact::{mid_price_avg, rate_of_change},
     trade::{avg_trade_price, trade_imbalance},
 };
-
 #[derive(Debug, Clone)]
 pub struct Engine {
+    pub timestamp: u64,
     pub bba_imbalance: f64,
     pub deep_imbalance: Vec<f64>,
     pub voi: f64,
@@ -22,12 +22,12 @@ pub struct Engine {
     pub rate_of_change: ROC,
     pub mpb: MPB,
     pub skew: f64,
-    pub tick_window: usize,
 }
 
 impl Engine {
     pub fn new(tick_window: usize) -> Self {
         Self {
+            timestamp: 0,
             bba_imbalance: 0.0,
             deep_imbalance: Vec::new(),
             voi: 0.0,
@@ -38,7 +38,6 @@ impl Engine {
             rate_of_change: ROC::new(tick_window),
             mpb: MPB::new(tick_window),
             skew: 0.0,
-            tick_window,
         }
     }
 
@@ -90,8 +89,8 @@ impl Engine {
         self.price_impact
     }
 
-    pub fn get_volatility(&self) -> RollingVolatility {
-        self.volatility.clone()
+    pub fn get_volatility(&self) -> f64 {
+        self.volatility.clone().current_vol
     }
 
     pub fn get_rate_of_change(&self) -> ROC {
@@ -102,58 +101,107 @@ impl Engine {
         self.mpb.clone()
     }
 
-    pub fn update_engine<OB: OrderBook>(
+    pub fn get_skew(&self) -> f64 {
+        self.skew
+    }
+
+    pub fn update_engine(
         &mut self,
-        current_book: OB,
-        previous_book: OB,
+        current_book: BybitBook,
+        previous_book: &BybitBook,
         current_trades: &TradeType,
         previous_trades: &TradeType,
         prev_avg_trade_price: f64,
         depth: Vec<usize>,
     ) {
-        self.set_bba_imbalance(current_book.imbalance_ratio(None));
+        if self.timestamp == 0 || (self.timestamp - current_book.last_update) >= 1000 {
+            self.set_bba_imbalance(current_book.imbalance_ratio(None));
 
-        let deep_imbalance = depth[0..]
-            .iter()
-            .map(|x| current_book.imbalance_ratio(Some(*x)))
-            .collect();
+            let deep_imbalance = depth[0..]
+                .iter()
+                .map(|x| current_book.imbalance_ratio(Some(*x)))
+                .collect();
 
-        self.set_deep_imbalance(deep_imbalance);
+            self.set_deep_imbalance(deep_imbalance);
 
-        let voi = current_book.voi(&previous_book, None);
+            let voi = current_book.voi(&previous_book, None);
 
-        self.set_voi(voi);
+            self.set_voi(voi);
 
-        let ofi = current_book.ofi(&previous_book, None);
+            let ofi = current_book.ofi(&previous_book, None);
 
-        self.set_ofi(ofi);
+            self.set_ofi(ofi);
 
-        self.set_trade_imbalance(trade_imbalance(current_trades));
+            self.set_trade_imbalance(trade_imbalance(current_trades));
 
-        let impact = current_book.price_impact(&previous_book, None);
-        self.set_price_impact(impact);
+            let impact = current_book.price_impact(&previous_book, None);
+            self.set_price_impact(impact);
 
-        self.volatility.update(current_book.get_mid_price());
+            self.volatility.update(current_book.get_mid_price());
 
-        self.rate_of_change.update(rate_of_change(
-            previous_book.get_mid_price(),
-            current_book.get_mid_price(),
-        ));
+            self.rate_of_change.update(rate_of_change(
+                previous_book.get_mid_price(),
+                current_book.get_mid_price(),
+            ));
 
-        let avg_trade_price = avg_trade_price(
-            current_book.get_mid_price(),
-            Some(previous_trades),
-            current_trades,
-            prev_avg_trade_price,
-        );
-        self.mpb.update_basis(
-            avg_trade_price
-                - mid_price_avg(previous_book.get_mid_price(), current_book.get_mid_price()),
-        );
+            let avg_trade_price = avg_trade_price(
+                current_book.get_mid_price(),
+                Some(previous_trades),
+                current_trades,
+                prev_avg_trade_price,
+            );
+            self.mpb.update_basis(
+                avg_trade_price
+                    - mid_price_avg(previous_book.get_mid_price(), current_book.get_mid_price()),
+            );
+
+            self.generate_skew();
+        }
     }
 
     pub fn generate_skew(&mut self) {
-        self.skew = 0.0;
+        // 1. Order Flow Signal
+        let order_flow = if self.ofi > 0.0 && self.voi > 0.0 {
+            1.0 // Strong buying pressure
+        } else if self.ofi < 0.0 && self.voi < 0.0 {
+            -1.0 // Strong selling pressure
+        } else {
+            0.5 // Neutral/mixed signals
+        };
+
+        // 2. Core components for skew calculation
+        let trade_skew = self.trade_imbalance.clamp(-1.0, 1.0);
+        let book_skew = self.bba_imbalance.clamp(-1.0, 1.0);
+
+        // 3. Depth-weighted imbalance gradient
+        let depth_mean = if self.deep_imbalance.is_empty() {
+            0.0
+        } else {
+            self.deep_imbalance.iter().sum::<f64>() / self.deep_imbalance.len() as f64
+        };
+
+        // 4. Volatility-adjusted basis skew
+        let basis_skew = if self.mpb.std_dev() > 0.0 {
+            self.mpb.z_score().tanh() // Normalize z-score to [-1, 1]
+        } else {
+            self.mpb.current_basis().signum()
+        };
+
+        // 5. Momentum-adjusted weighting factors
+        let momentum_factor = self.rate_of_change.z_score().tanh().abs();
+        let volatility_factor = 1.0 / (self.volatility.current_vol.max(0.001));
+
+        // 6. Composite skew calculation with order flow
+        let raw_skew = 0.3 * trade_skew
+            + 0.25 * book_skew
+            + 0.2 * depth_mean
+            + 0.15 * basis_skew
+            + 0.1 * order_flow;
+
+        // 7. Apply momentum and volatility scaling
+        self.skew = (raw_skew * momentum_factor * volatility_factor)
+            .tanh() // Ensure final value stays in [-1, 1]
+            .clamp(-1.0, 1.0);
     }
 }
 
