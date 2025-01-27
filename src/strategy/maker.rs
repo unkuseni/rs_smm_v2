@@ -20,7 +20,7 @@ pub struct Maker {
 }
 
 impl Maker {
-    pub fn new(
+    pub async fn new(
         ss: SharedState,
         symbols: Vec<String>,
         asset: HashMap<String, f64>,
@@ -43,7 +43,8 @@ impl Maker {
                 orders_per_side,
                 tick_window,
                 rate_limit,
-            ),
+            )
+            .await,
             depths,
             tick_window,
         }
@@ -115,7 +116,7 @@ impl Maker {
         }
     }
 
-    fn build_generators(
+    async fn build_generators(
         clients: HashMap<String, BybitClient>,
         asset: HashMap<String, f64>,
         leverage: f64,
@@ -134,7 +135,8 @@ impl Maker {
                     orders_per_side,
                     tick_window,
                     rate_limit,
-                ),
+                )
+                .await,
             );
         }
         generators
