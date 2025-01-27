@@ -46,6 +46,7 @@ impl QuoteGenerator {
         client: BybitClient,
         asset: f64,
         leverage: f64,
+        orders_per_side: usize,
         tick_window: usize,
         rate_limit: usize,
     ) -> Self {
@@ -58,7 +59,7 @@ impl QuoteGenerator {
             inventory_delta: 0.0,
             live_buys: VecDeque::with_capacity(ORDER_CHUNK_SIZE),
             live_sells: VecDeque::with_capacity(ORDER_CHUNK_SIZE),
-            total_order: 8,
+            total_order: orders_per_side,
             final_order_distance: 10.0,
             rate_limit,
             initial_limit: rate_limit,
