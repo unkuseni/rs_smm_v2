@@ -8,3 +8,4 @@ members = ["skeleton"]
 
 [dependencies]
 skeleton = { path = "./skeleton" }
+tokio = { version = "1.42.0", features = ["full"] }
