@@ -194,6 +194,21 @@ impl LiveOrder {
     }
 }
 
+pub fn sort_grid(orders: &mut VecDeque<LiveOrder>, side: i32) -> VecDeque<LiveOrder> {
+    orders.make_contiguous().sort_by(|a, b| {
+        if side > 0 {
+            a.price
+                .partial_cmp(&b.price)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        } else {
+            b.price
+                .partial_cmp(&a.price)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }
+    });
+    orders.clone()
+}
+
 impl PartialOrd for LiveOrder {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.price.partial_cmp(&other.price)

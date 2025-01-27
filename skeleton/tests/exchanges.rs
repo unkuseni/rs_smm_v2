@@ -17,16 +17,16 @@ mod tests {
         let (sender, mut receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             client
-                .market_subscribe(vec!["ETHUSDT".to_string()], sender)
+                .market_subscribe(vec!["SOLUSDT".to_string()], sender)
                 .await;
         });
         while let Some(data) = receiver.recv().await {
-            if let Some(event) = data.books.get("ETHUSDT") {
+            if let Some(event) = data.books.get("SOLUSDT") {
                 let (mut asks, bids) = event.get_depth(4);
                 asks.reverse();
-                if let Some(new_trades) = data.trades.get("ETHUSDT") {
+                if let Some(new_trades) = data.trades.get("SOLUSDT") {
                     println!(
-                        "Current ETHUSDT price:\nBest Asks: {:#?}\nWMID: {:#?}  Trade: {:#?}  Trend: {:#?}\nBest Bids: {:#?}\n",
+                        "Current SOLUSDT price:\nBest Asks: {:#?}\nWMID: {:#?}  Trade: {:#?}  Trend: {:#?}\nBest Bids: {:#?}\n",
                         asks,
                         event.get_wmid(Some(4)),
                         new_trades.len(),
