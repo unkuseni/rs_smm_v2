@@ -1,7 +1,9 @@
 use skeleton::{
     exchange::exchange::Exchange,
     utils::{
+        bot::LiveBot,
         localorderbook::OrderBook,
+        logger::Logger,
         models::{sort_grid, BatchOrder, BybitBook, BybitClient, BybitPrivate, LiveOrder},
         number::{geometric_weights, geomspace, nbsqrt, round_step, Round},
     },
@@ -22,16 +24,17 @@ const ORDER_CHUNK_SIZE: usize = 10;
 
 #[derive(Debug)]
 pub struct QuoteGenerator {
+    logger: Logger,
     client: BybitClient,
     max_position_usd: f64,
-    position_qty: f64,
+    pub position_qty: f64,
     minimum_spread: f64,
-    adjusted_spread: f64,
+    pub adjusted_spread: f64,
     pub inventory_delta: f64,
     pub live_buys: VecDeque<LiveOrder>,
     pub live_sells: VecDeque<LiveOrder>,
-    pub total_order: usize,
-    pub final_order_distance: f64,
+    total_order: usize,
+    final_order_distance: f64,
     rate_limit: usize,
     cancel_limit: usize,
     initial_limit: usize,
@@ -42,7 +45,7 @@ pub struct QuoteGenerator {
 }
 
 impl QuoteGenerator {
-    pub fn new(
+    pub async fn new(
         client: BybitClient,
         asset: f64,
         leverage: f64,
@@ -50,7 +53,9 @@ impl QuoteGenerator {
         tick_window: usize,
         rate_limit: usize,
     ) -> Self {
+        let bot = LiveBot::new("./config.toml").await.unwrap();
         Self {
+            logger: Logger::new(bot),
             client,
             max_position_usd: Self::max_position_usd(asset, leverage),
             position_qty: 0.0,
@@ -275,6 +280,11 @@ impl QuoteGenerator {
                         .position(|o| o.order_id == exec.order_id)
                     {
                         self.position_qty += self.live_buys[idx].qty;
+                        let msg = format!(
+                            "Buy fill: {:.2} @ {:.2}",
+                            self.live_buys[idx].qty, self.live_buys[idx].price
+                        );
+                        self.logger.info(&msg);
                         buy_indices.push(idx);
                         fill_occurred = true;
                     }
@@ -286,6 +296,11 @@ impl QuoteGenerator {
                         .position(|o| o.order_id == exec.order_id)
                     {
                         self.position_qty -= self.live_sells[idx].qty;
+                        let msg = format!(
+                            "Sell fill: {:.2} @ {:.2}",
+                            self.live_sells[idx].qty, self.live_sells[idx].price
+                        );
+                        self.logger.info(&msg);
                         sell_indices.push(idx);
                         fill_occurred = true;
                     }
@@ -363,6 +378,11 @@ impl QuoteGenerator {
             if let Ok(orders) = self.generate_quotes(&symbol, &book, skew, volatility) {
                 if self.rate_limit > 0 {
                     self.send_batch_orders(orders).await;
+                    let msg = format!(
+                        "Grid update: {:.2} @ {:.2}",
+                        self.position_qty, self.last_update_price
+                    );
+                    self.logger.info(&msg);
                 }
             }
         }
