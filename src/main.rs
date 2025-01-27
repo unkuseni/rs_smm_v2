@@ -43,7 +43,8 @@ async fn main() {
         rate_limit,
         tick_window,
         depths,
-    );
+    )
+    .await;
 
     // sets the  base spread in bps for profit
     market_maker.set_spread_toml(bps);
