@@ -17,15 +17,41 @@ use super::logger::Logger;
 pub struct Config {
     pub token: String,
     pub chat_id: i64,
+    pub api_keys: Vec<(String, String, String)>,
+    pub balances: Vec<(String, f64)>,
+    pub leverage: f64,
+    pub orders_per_side: usize,
+    pub depths: Vec<usize>,
+    pub rate_limit: usize,
+    pub bps: Vec<f64>,
+    pub tick_window: usize,
 }
 
 impl PartialEq for Config {
     fn eq(&self, other: &Self) -> bool {
-        self.token == other.token && self.chat_id == other.chat_id
+        self.token == other.token
+            && self.chat_id == other.chat_id
+            && self.api_keys == other.api_keys
+            && self.balances == other.balances
+            && self.leverage == other.leverage
+            && self.orders_per_side == other.orders_per_side
+            && self.depths == other.depths
+            && self.rate_limit == other.rate_limit
+            && self.bps == other.bps
+            && self.tick_window == other.tick_window
     }
 
     fn ne(&self, other: &Self) -> bool {
-        self.token != other.token && self.chat_id != other.chat_id
+        self.token != other.token
+            && self.chat_id != other.chat_id
+            && self.api_keys != other.api_keys
+            && self.balances != other.balances
+            && self.leverage != other.leverage
+            && self.orders_per_side != other.orders_per_side
+            && self.depths != other.depths
+            && self.rate_limit != other.rate_limit
+            && self.bps != other.bps
+            && self.tick_window != other.tick_window
     }
 }
 #[derive(Clone, Debug)]
