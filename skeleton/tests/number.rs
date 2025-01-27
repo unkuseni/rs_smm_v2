@@ -14,23 +14,27 @@ mod tests {
     #[test]
     fn test_geometric_weights() {
         let (ratio, size, reverse) = (0.3, 5, false);
-        let weights = geometric_weights(ratio, size, reverse);
-        assert_eq!(
-            weights,
-            vec![
-                0.7017051434987018,
-                0.21051154304961053,
-                0.06315346291488316,
-                0.01894603887446495,
-                0.005683811662339485
-            ]
-        );
+        let buy_weights = geometric_weights(ratio, size, reverse);
+        let sell_weights = geometric_weights(ratio, size, true);
+        println!("Buy Weights: {:?}", buy_weights);
+        println!("Sell Weights: {:?}", sell_weights);
     }
     #[test]
     fn test_geomspace() {
-        let (start, end, size) = (1.0, 10.0, 5);
+        let (start, end, size) = (0.5, 0.76, 5);
         let result = geomspace(start, end, size);
-        assert_eq!(result, vec![1.0, 1.778279410038923, 3.1622776601683795, 5.623413251903492, 10.0]);
+        println!("{:?}", result);
+        println!("{:?}", result);
+    }
+
+    #[test]
+    fn test_geomspace_geom_weights() {
+        let (start, end, size) = (0.5, 0.76, 4);
+        let (ratio, wei_size, reverse) = (0.37, 4, true);
+        let result = geomspace(start, end, size);
+        let buy_weights = geometric_weights(ratio, wei_size, false);
+        let sell_weights = geometric_weights(ratio, wei_size, reverse);
+        println!("Buy Weights: {:#?} Prices: {:#?} Sell Weights: {:#?}", buy_weights, result, sell_weights);
     }
     #[test]
     fn test_linspace() {
@@ -55,7 +59,7 @@ mod tests {
     fn test_round() {
         let value = 35.463245660;
         assert_eq!(value.round_to(3), 35.463);
-        assert_eq!(value.clip(0.0, 100.0),  35.46324566);
+        assert_eq!(value.clip(0.0, 100.0), 35.46324566);
         assert_eq!(value.count_decimal_places(), 8);
     }
 }

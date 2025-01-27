@@ -148,10 +148,12 @@ impl QuoteGenerator {
 
         let inventory_factor = nbsqrt(self.inventory_delta)?;
         let skew_factor = skew * (1.0 - inventory_factor.abs());
-        let combined_skew = (skew_factor + INVENTORY_ADJUSTMENT * inventory_factor).clamp(-1.0, 1.0);
+        let combined_skew =
+            (skew_factor + INVENTORY_ADJUSTMENT * inventory_factor).clamp(-1.0, 1.0);
 
         let is_positive_skew = combined_skew >= 0.0;
-        let orders = self.generate_skew_orders(symbol, half_spread, spread, skew, book, is_positive_skew);
+        let orders =
+            self.generate_skew_orders(symbol, half_spread, spread, skew, book, is_positive_skew);
 
         Ok(orders)
     }
@@ -179,8 +181,8 @@ impl QuoteGenerator {
         };
 
         let end = spread * self.final_order_distance;
-        let bid_prices = geomspace(best_bid, best_bid - end, self.total_order);
-        let ask_prices = geomspace(best_ask + end, best_ask, self.total_order);
+        let bid_prices = geomspace(best_bid - end, best_bid, self.total_order);
+        let ask_prices = geomspace(best_ask, best_ask + end, self.total_order);
 
         let (bid_r, ask_r) = if is_positive_skew {
             (clipped_r, 0.37)
@@ -190,7 +192,7 @@ impl QuoteGenerator {
 
         let max_buy_qty = (self.max_position_usd / 2.0) - (self.position_qty * mid_price);
         let bid_sizes = if self.inventory_delta < 0.5 {
-            geometric_weights(bid_r, self.total_order, true)
+            geometric_weights(bid_r, self.total_order, false)
                 .into_iter()
                 .map(|w| w * max_buy_qty)
                 .collect()
@@ -200,7 +202,7 @@ impl QuoteGenerator {
 
         let max_sell_qty = (self.max_position_usd / 2.0) + (self.position_qty * mid_price);
         let ask_sizes = if self.inventory_delta > -0.5 {
-            geometric_weights(ask_r, self.total_order, false)
+            geometric_weights(ask_r, self.total_order, true)
                 .into_iter()
                 .map(|w| w * max_sell_qty)
                 .collect()
@@ -240,7 +242,7 @@ impl QuoteGenerator {
             if self.rate_limit == 0 {
                 break;
             }
-            
+
             if let Ok((live_buys, live_sells)) = self.client.batch_orders(chunk.to_vec()).await {
                 self.live_buys.extend(live_buys);
                 self.live_sells.extend(live_sells);
@@ -257,19 +259,31 @@ impl QuoteGenerator {
         let mut sell_indices = Vec::new();
 
         for exec in &info.executions {
-            let Ok(qty) = exec.exec_qty.replace(',', "").parse::<f64>() else { continue };
-            if qty <= 0.0 { continue }
+            let Ok(qty) = exec.exec_qty.replace(',', "").parse::<f64>() else {
+                continue;
+            };
+            if qty <= 0.0 {
+                continue;
+            }
 
             match exec.side.as_str() {
                 "Buy" => {
-                    if let Some(idx) = self.live_buys.iter().position(|o| o.order_id == exec.order_id) {
+                    if let Some(idx) = self
+                        .live_buys
+                        .iter()
+                        .position(|o| o.order_id == exec.order_id)
+                    {
                         self.position_qty += self.live_buys[idx].qty;
                         buy_indices.push(idx);
                         fill_occurred = true;
                     }
                 }
                 "Sell" => {
-                    if let Some(idx) = self.live_sells.iter().position(|o| o.order_id == exec.order_id) {
+                    if let Some(idx) = self
+                        .live_sells
+                        .iter()
+                        .position(|o| o.order_id == exec.order_id)
+                    {
                         self.position_qty -= self.live_sells[idx].qty;
                         sell_indices.push(idx);
                         fill_occurred = true;
@@ -312,11 +326,14 @@ impl QuoteGenerator {
         let fill_detected = self.check_for_fills(&private);
         self.set_inventory_delta(book.get_mid_price());
 
-        if (bounds_violated || fill_detected || stale_data) && self.cancel_limit > MIN_CANCEL_LIMIT {
+        if (bounds_violated || fill_detected || stale_data) && self.cancel_limit > MIN_CANCEL_LIMIT
+        {
             if let Ok(cancelled) = self.client.cancel_all(symbol).await {
                 let cancelled_ids: HashSet<_> = cancelled.iter().map(|o| &o.order_id).collect();
-                self.live_buys.retain(|o| !cancelled_ids.contains(&o.order_id));
-                self.live_sells.retain(|o| !cancelled_ids.contains(&o.order_id));
+                self.live_buys
+                    .retain(|o| !cancelled_ids.contains(&o.order_id));
+                self.live_sells
+                    .retain(|o| !cancelled_ids.contains(&o.order_id));
                 self.last_update_price = book.mid_price;
                 self.cancel_limit -= 1;
                 return true;
@@ -334,7 +351,7 @@ impl QuoteGenerator {
         volatility: f64,
     ) {
         self.vol_adjusted_bounds(&book, volatility);
-        
+
         if self.time_limit > 1 && (book.last_update - self.time_limit) > 1000 {
             self.rate_limit = self.initial_limit;
             self.cancel_limit = self.initial_limit;
