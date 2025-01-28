@@ -54,7 +54,7 @@ async fn main() {
 
     // loads up the shareed state and sends it across the channel
     tokio::spawn(async move {
-        state.load_data(sender).await;
+        ss::SharedState::load_data(state, sender).await;
     });
 
     // passes in the data receiver to the market maker and starts the loop

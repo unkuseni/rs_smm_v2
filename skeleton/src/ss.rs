@@ -38,41 +38,40 @@ impl SharedState {
             .or_insert(BybitPrivate::default());
     }
 
-    pub async fn load_data(self, state_sender: mpsc::UnboundedSender<SharedState>) {
-        match self.exchange.as_str() {
-            "bybit" => self.load_bybit(state_sender).await,
-            "binance" => self.load_binance(state_sender).await,
-            "both" => self.load_both(state_sender).await,
+    pub async fn load_data(state: SharedState, state_sender: mpsc::UnboundedSender<SharedState>) {
+        match state.exchange.as_str() {
+            "bybit" => Self::load_bybit(state, state_sender).await,
+            "binance" => Self::load_binance(state, state_sender).await,
+            "both" => Self::load_both(state, state_sender).await,
             _ => panic!("Invalid exchange"),
         }
     }
 
-    async fn load_binance(self, _state_sender: mpsc::UnboundedSender<SharedState>) {
+    async fn load_binance(_state: SharedState, _state_sender: mpsc::UnboundedSender<SharedState>) {
         unimplemented!("Binance not implemented");
     }
 
-    async fn load_bybit(self, state_sender: mpsc::UnboundedSender<SharedState>) {
-        let state = Arc::new(Mutex::new(self.clone()));
+    async fn load_bybit(state: SharedState, state_sender: mpsc::UnboundedSender<SharedState>) {
+        let symbols = state.symbols.clone();
 
         let (bybit_market_sender, mut bybit_market_receiver) =
             mpsc::unbounded_channel::<BybitMarket>();
         let (bybit_private_sender, mut bybit_private_receiver) =
             mpsc::unbounded_channel::<(String, BybitPrivate)>();
 
-        let symbols = self.symbols.clone();
-        for (symbol, client) in self.clients {
+        for (symbol, client) in state.clients.clone() {
             let private_clone = bybit_private_sender.clone();
             tokio::spawn(async move {
                 client.private_subscribe(symbol, private_clone).await;
             });
         }
-
         tokio::spawn(async move {
             let market_stream = BybitClient::init("".to_string(), "".to_string()).await;
             market_stream
                 .market_subscribe(symbols, bybit_market_sender)
                 .await;
         });
+        let state = Arc::new(Mutex::new(state.clone()));
 
         loop {
             tokio::select! {
@@ -90,9 +89,7 @@ impl SharedState {
         }
     }
 
-    async fn load_both(self, state_sender: mpsc::UnboundedSender<SharedState>) {
-        let state = Arc::new(Mutex::new(self.clone()));
-
+    async fn load_both(state: SharedState, state_sender: mpsc::UnboundedSender<SharedState>) {
         let (bybit_market_sender, mut bybit_market_receiver) =
             mpsc::unbounded_channel::<BybitMarket>();
         let (binance_market_sender, mut binance_market_receiver) =
@@ -100,15 +97,17 @@ impl SharedState {
         let (bybit_private_sender, mut bybit_private_receiver) =
             mpsc::unbounded_channel::<(String, BybitPrivate)>();
 
-        let binance_symbols = self.symbols.clone();
-        let bybit_symbols = self.symbols.clone();
+        let binance_symbols = state.symbols.clone();
+        let bybit_symbols = state.symbols.clone();
 
-        for (symbol, client) in self.clients {
+        for (symbol, client) in state.clients.clone() {
             let private_clone = bybit_private_sender.clone();
             tokio::spawn(async move {
                 client.private_subscribe(symbol, private_clone).await;
             });
         }
+
+        let state = Arc::new(Mutex::new(state.clone()));
 
         tokio::spawn(async move {
             let market_stream = BybitClient::init("".to_string(), "".to_string()).await;
