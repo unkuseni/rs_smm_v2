@@ -95,7 +95,7 @@ mod tests {
         );
         let (sender, mut receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move {
-            ss.load_data(sender).await;
+            SharedState::load_data(ss, sender).await;
         });
         let instant = std::time::Instant::now();
         while let Some(v) = receiver.recv().await {

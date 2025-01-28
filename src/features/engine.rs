@@ -155,6 +155,8 @@ impl Engine {
                     - mid_price_avg(previous_book.get_mid_price(), current_book.get_mid_price()),
             );
 
+            self.timestamp = current_book.last_update;
+
             self.generate_skew();
         }
     }
