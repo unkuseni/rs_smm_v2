@@ -52,7 +52,7 @@ impl Maker {
 
     pub async fn start_loop(&mut self, mut receiver: mpsc::UnboundedReceiver<SharedState>) {
         let mut update_grid_send = 0;
-        let mut wait = interval(Duration::from_secs(3));
+        let mut wait = interval(Duration::from_secs(2));
 
         while let Some(new_state) = receiver.recv().await {
             match new_state.exchange.as_str() {
@@ -158,8 +158,7 @@ impl Maker {
                         let volatility = engine.volatility.current_vol;
                         if let Some(private) = private.get(&symbol) {
                             generator
-                                .update_grid(private.clone(), skew, book, symbol, volatility)
-                                .await;
+                                .update_grid(private.clone(), skew, book, symbol, volatility).await;
                         }
                     }
                 }

@@ -158,8 +158,14 @@ impl QuoteGenerator {
             (skew_factor + INVENTORY_ADJUSTMENT * inventory_factor).clamp(-1.0, 1.0);
 
         let is_positive_skew = combined_skew >= 0.0;
-        let orders =
-            self.generate_skew_orders(symbol, half_spread, spread, skew, book, is_positive_skew);
+        let orders = self.generate_skew_orders(
+            symbol,
+            half_spread,
+            spread,
+            skew.abs(),
+            book,
+            is_positive_skew,
+        );
 
         Ok(orders)
     }
@@ -175,7 +181,7 @@ impl QuoteGenerator {
     ) -> Vec<BatchOrder> {
         let mid_price = book.get_mid_price();
         let notional = book.min_notional;
-        let clipped_r = skew.clamp(0.10, 0.63);
+        let clipped_r = skew.clamp(0.10, 0.40);
         let post_only_max = book.post_only_max;
 
         let (best_bid, best_ask) = if is_positive_skew {
@@ -196,7 +202,11 @@ impl QuoteGenerator {
             (0.37, clipped_r)
         };
 
-        let max_buy_qty = (self.max_position_usd / 2.0) - (self.position_qty * mid_price);
+        let max_buy_qty = if self.position_qty != 0.0 {
+            (self.max_position_usd / 2.0) - (self.position_qty * mid_price)
+        } else {
+            self.max_position_usd / 2.0
+        };
         let bid_sizes = if self.inventory_delta < 0.5 {
             geometric_weights(bid_r, self.total_order, false)
                 .into_iter()
@@ -206,7 +216,11 @@ impl QuoteGenerator {
             vec![]
         };
 
-        let max_sell_qty = (self.max_position_usd / 2.0) + (self.position_qty * mid_price);
+        let max_sell_qty = if self.position_qty != 0.0 {
+            (self.max_position_usd / 2.0) + (self.position_qty * mid_price)
+        } else {
+            self.max_position_usd / 2.0
+        };
         let ask_sizes = if self.inventory_delta > -0.5 {
             geometric_weights(ask_r, self.total_order, true)
                 .into_iter()
@@ -238,7 +252,6 @@ impl QuoteGenerator {
                 ));
             }
         }
-
         orders.retain(|order| (order.1 * order.2) >= notional);
         orders
     }
@@ -377,12 +390,13 @@ impl QuoteGenerator {
             self.set_inventory_delta(book.get_mid_price());
             if let Ok(orders) = self.generate_quotes(&symbol, &book, skew, volatility) {
                 if self.rate_limit > 0 {
+                    let order_len = orders.len();
+
                     self.send_batch_orders(orders).await;
-                    let msg = format!(
-                        "Grid update: {:.2} @ {:.2}",
-                        self.position_qty, self.last_update_price
-                    );
-                    self.logger.info(&msg);
+                    self.logger.info(&format!(
+                        "Generated {} orders for {} at {} Position: {:#?} Skew: {:.2}",
+                        order_len, symbol, &book.mid_price, self.position_qty, skew
+                    ));
                 }
             }
         }
