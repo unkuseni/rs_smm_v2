@@ -26,9 +26,11 @@ mod tests {
                 asks.reverse();
                 if let Some(new_trades) = data.trades.get("SOLUSDT") {
                     println!(
-                        "Current SOLUSDT price:\nBest Asks: {:#?}\nWMID: {:#?}  Trade: {:#?}  Trend: {:#?}\nBest Bids: {:#?}\n",
+                        "Timestamp: {:#?}  Current SOLUSDT price:\nBest Asks: {:#?}\nWMID: {:#?}  Trade: {:#?}  Trend: {:#?}\nBest Bids: {:#?}\n",
+                        data.timestamp,
                         asks,
-                        event.get_wmid(Some(4)),
+                        event.get_microprice(Some(4)),
+                        
                         new_trades.len(),
                         if (event.get_microprice(Some(4)) - event.best_bid.price) > (event.best_ask.price - event.get_microprice(Some(4))) {"up"} else {"down"},
                         bids
@@ -89,9 +91,12 @@ mod tests {
     #[tokio::test]
     async fn test_state() {
         let mut ss = SharedState::new("bybit".to_string());
+        let api_key: String = String::from("");
+        let api_secret: String = String::from("");
+
         ss.add_clients(
             "DOGSUSDT".to_string(),
-            BybitClient::init("".to_string(), "".to_string()).await,
+            BybitClient::init(api_key, api_secret).await,
         );
         let (sender, mut receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move {
@@ -118,8 +123,8 @@ mod tests {
                     }
                 },
             );
-            if instant.elapsed() > Duration::from_secs(60) {
-                println!("Shared State: {:#?}", v.markets[0]);
+            if instant.elapsed() > Duration::from_secs(180) {
+                println!("Shared State: {:#?}", v.privates.get("DOGSUSDT"));
                 break;
             }
         }
