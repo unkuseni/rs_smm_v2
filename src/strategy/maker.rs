@@ -1,20 +1,23 @@
 use skeleton::{
     exchange::exchange::{Exchange, MarketData, TradeType},
     ss::SharedState,
-    utils::models::{BybitBook, BybitClient, BybitPrivate},
+    utils::models::{BybitBook, BybitClient, BybitMarket, BybitPrivate},
 };
-use std::{collections::HashMap, time::Duration};
-use tokio::{sync::mpsc, time::interval};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
+use tokio::sync::mpsc;
 
 use crate::{features::engine::Engine, trader::quote_gen::QuoteGenerator};
 
 pub struct Maker {
-    pub features: HashMap<String, Engine>,
-    pub previous_book: HashMap<String, BybitBook>,
-    pub previous_trades: HashMap<String, TradeType>,
-    pub current_trades: HashMap<String, TradeType>,
-    pub previous_avg_trade_price: HashMap<String, f64>,
-    pub generators: HashMap<String, QuoteGenerator>,
+    pub features: BTreeMap<String, Engine>,
+    pub previous_book: BTreeMap<String, BybitBook>,
+    pub previous_trades: BTreeMap<String, TradeType>,
+    pub current_trades: BTreeMap<String, TradeType>,
+    pub previous_avg_trade_price: BTreeMap<String, f64>,
+    pub generators: BTreeMap<String, QuoteGenerator>,
     pub depths: Vec<usize>,
     pub tick_window: usize,
 }
@@ -22,7 +25,6 @@ pub struct Maker {
 impl Maker {
     pub async fn new(
         ss: SharedState,
-        symbols: Vec<String>,
         asset: HashMap<String, f64>,
         leverage: f64,
         orders_per_side: usize,
@@ -31,11 +33,11 @@ impl Maker {
         depths: Vec<usize>,
     ) -> Self {
         Self {
-            features: Self::build_features(symbols, tick_window),
-            previous_book: HashMap::new(),
-            previous_trades: HashMap::new(),
-            current_trades: HashMap::new(),
-            previous_avg_trade_price: HashMap::new(),
+            features: Self::build_features(ss.symbols, tick_window),
+            previous_book: BTreeMap::new(),
+            previous_trades: BTreeMap::new(),
+            current_trades: BTreeMap::new(),
+            previous_avg_trade_price: BTreeMap::new(),
             generators: Self::build_generators(
                 ss.clients,
                 asset,
@@ -51,129 +53,146 @@ impl Maker {
     }
 
     pub async fn start_loop(&mut self, mut receiver: mpsc::UnboundedReceiver<SharedState>) {
-        let mut update_grid_send = 0;
-        let mut wait = interval(Duration::from_secs(2));
+        let mut send = 0;
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let mut latest_market_data = None;
+        let depths = self.depths.clone();
 
-        while let Some(new_state) = receiver.recv().await {
-            match new_state.exchange.as_str() {
-                "bybit" | "binance" => {
-                    let market_data = new_state.markets[0].clone();
-                    let depths = self.depths.clone();
-
-                    self.update_features(market_data.clone(), depths);
-
-                    if update_grid_send > self.tick_window {
-                        // update grid orders
-                        self.potentially_update(new_state.privates, market_data)
-                            .await;
-                    } else {
-                        wait.tick().await;
-                        update_grid_send += 1;
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if let Some(market_data) = latest_market_data.take() {
+                        self.update_features(market_data, &depths);
+                        send += 1;
                     }
-                }
-                &_ => {}
-            }
-        }
-    }
-
-    fn build_features(symbols: Vec<String>, tick_window: usize) -> HashMap<String, Engine> {
-        let mut features = HashMap::new();
-        for symbol in symbols {
-            features.insert(symbol.clone(), Engine::new(tick_window));
-        }
-        features
-    }
-
-    fn update_features(&mut self, market_data: MarketData, depths: Vec<usize>) {
-        match market_data {
-            MarketData::Bybit(info) => {
-                for (symbol, current_book) in info.books {
-                    if let (
-                        Some(previous_book),
-                        Some(previous_trades),
-                        Some(current_trades),
-                        Some(previous_avg_trade_price),
-                        Some(features),
-                    ) = (
-                        self.previous_book.get(&symbol),
-                        self.previous_trades.get(&symbol),
-                        self.current_trades.get(&symbol),
-                        self.previous_avg_trade_price.get(&symbol),
-                        self.features.get_mut(&symbol),
-                    ) {
-                        features.update_engine(
-                            current_book,
-                            previous_book,
-                            current_trades,
-                            previous_trades,
-                            *previous_avg_trade_price,
-                            depths.clone(),
-                        );
+                },
+                Some(ss) = receiver.recv() => {
+                    match &ss.markets[0] {
+                        MarketData::Bybit(data) => latest_market_data = Some(data.clone()),
+                        _ => continue,
                     }
-                }
-            }
-            MarketData::Binance(_) => {}
-        }
-    }
-
-    async fn build_generators(
-        clients: HashMap<String, BybitClient>,
-        asset: HashMap<String, f64>,
-        leverage: f64,
-        orders_per_side: usize,
-        tick_window: usize,
-        rate_limit: usize,
-    ) -> HashMap<String, QuoteGenerator> {
-        let mut generators = HashMap::new();
-        for (symbol, client) in clients {
-            let _ = client.set_leverage(symbol.as_str(), leverage as u8).await;
-            generators.insert(
-                symbol.clone(),
-                QuoteGenerator::new(
-                    client,
-                    asset.get(&symbol).unwrap().clone(),
-                    leverage,
-                    orders_per_side,
-                    tick_window,
-                    rate_limit,
-                )
-                .await,
-            );
-        }
-        generators
-    }
-
-    async fn potentially_update(
-        &mut self,
-        private: HashMap<String, BybitPrivate>,
-        data: MarketData,
-    ) {
-        match data {
-            MarketData::Bybit(info) => {
-                for (symbol, book) in info.books {
-                    if let (Some(engine), Some(generator)) =
-                        (self.features.get(&symbol), self.generators.get_mut(&symbol))
-                    {
-                        let skew = engine.skew;
-                        let volatility = engine.volatility.current_vol;
-                        if let Some(private) = private.get(&symbol) {
-                            generator
-                                .update_grid(private.clone(), skew, book, symbol, volatility).await;
+                    if send > self.tick_window {
+                        if let Some(market_data) = latest_market_data.take() {
+                        self.potentially_update(ss.privates, market_data).await;
                         }
                     }
                 }
             }
-            _ => {}
+        }
+    }
+
+    fn build_features(symbols: Vec<String>, tick_window: usize) -> BTreeMap<String, Engine> {
+        symbols
+            .into_iter()
+            .map(|symbol| (symbol, Engine::new(tick_window)))
+            .collect()
+    }
+
+    async fn build_generators(
+        clients: BTreeMap<String, BybitClient>,
+        mut asset: HashMap<String, f64>,
+        leverage: f64,
+        orders_per_side: usize,
+        tick_window: usize,
+        rate_limit: usize,
+    ) -> BTreeMap<String, QuoteGenerator> {
+        let mut generators = BTreeMap::new();
+        let mut tasks = Vec::new();
+
+        for (symbol, client) in clients {
+            let Some(asset_value) = asset.remove(&symbol) else {
+                eprintln!("Missing asset for {}", symbol);
+                continue;
+            };
+
+            let symbol_clone = symbol.clone();
+            tasks.push(async move {
+                let _ = client.set_leverage(&symbol_clone, leverage as u8).await;
+
+                (
+                    symbol,
+                    QuoteGenerator::new(
+                        client,
+                        asset_value,
+                        leverage,
+                        orders_per_side,
+                        tick_window,
+                        rate_limit,
+                    )
+                    .await,
+                )
+            });
+        }
+
+        for task in tasks {
+            let (symbol, generator) = task.await;
+            generators.insert(symbol, generator);
+        }
+
+        generators
+    }
+
+    fn update_features(&mut self, market_data: BybitMarket, depths: &[usize]) {
+        self.current_trades = market_data.trades;
+
+        for (symbol, current_book) in market_data.books {
+            let features = match self.features.get_mut(&symbol) {
+                Some(f) => f,
+                None => continue,
+            };
+
+            let (Some(prev_book), Some(prev_trades), Some(curr_trades), Some(prev_avg)) = (
+                self.previous_book.get(&symbol),
+                self.previous_trades.get(&symbol),
+                self.current_trades.get(&symbol),
+                self.previous_avg_trade_price.get(&symbol),
+            ) else {
+                continue;
+            };
+
+            features.update_engine(
+                &current_book,
+                prev_book,
+                curr_trades,
+                prev_trades,
+                *prev_avg,
+                depths,
+            );
+
+            self.previous_book.insert(symbol.clone(), current_book);
+
+            let avg_price = features.get_avg_trade_price();
+            self.previous_avg_trade_price.insert(symbol, avg_price);
+        }
+
+        self.previous_trades = std::mem::take(&mut self.current_trades);
+    }
+
+    async fn potentially_update(
+        &mut self,
+        private: BTreeMap<String, BybitPrivate>,
+        data: BybitMarket,
+    ) {
+        for (symbol, book) in data.books {
+            if let (Some(engine), Some(generator)) =
+                (self.features.get(&symbol), self.generators.get_mut(&symbol))
+            {
+                let skew = engine.get_skew();
+                let volatility = engine.get_volatility();
+                println!("skew: {}, volatility: {}", skew, volatility);
+                if let Some(private) = private.get(&symbol) {
+                    generator
+                        .update_grid(private.clone(), skew, book, symbol, volatility)
+                        .await;
+                }
+            }
         }
     }
 
     pub fn set_spread_toml(&mut self, bps: Vec<f64>) {
-        let mut index = 0;
-        for (_, v) in self.generators.iter_mut() {
-            // Set the spread for the current generator
-            v.set_min_spread(bps[index]);
-            // Move to the next spread value
-            index += 1;
-        }
+        self.generators
+            .values_mut()
+            .zip(bps.into_iter())
+            .for_each(|(gen, spread)| gen.set_min_spread(spread));
     }
 }
