@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, vec};
+use std::{collections::BTreeMap, sync::Arc, vec};
 
 use tokio::sync::{mpsc, Mutex};
 
@@ -10,8 +10,8 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct SharedState {
     pub exchange: String,
-    pub clients: HashMap<String, BybitClient>,
-    pub privates: HashMap<String, BybitPrivate>,
+    pub clients: BTreeMap<String, BybitClient>,
+    pub privates: BTreeMap<String, BybitPrivate>,
     pub markets: Vec<MarketData>,
     pub symbols: Vec<String>,
 }
@@ -20,8 +20,8 @@ impl SharedState {
     pub fn new(exchange: String) -> Self {
         Self {
             exchange,
-            clients: HashMap::new(),
-            privates: HashMap::new(),
+            clients: BTreeMap::new(),
+            privates: BTreeMap::new(),
             markets: vec![
                 MarketData::Bybit(BybitMarket::default()),
                 MarketData::Binance(BinanceMarket::default()),
