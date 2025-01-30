@@ -1,4 +1,3 @@
-use binance::model::AggrTradesEvent;
 use bybit::model::WsTrade;
 use std::{collections::VecDeque, future::Future};
 use tokio::sync::mpsc::UnboundedSender;
