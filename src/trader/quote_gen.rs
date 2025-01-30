@@ -181,7 +181,7 @@ impl QuoteGenerator {
     ) -> Vec<BatchOrder> {
         let mid_price = book.get_mid_price();
         let notional = book.min_notional;
-        let clipped_r = skew.clamp(0.10, 0.40);
+        // let clipped_r = skew.clamp(0.10, 0.63);
         let post_only_max = book.post_only_max;
 
         let (best_bid, best_ask) = if is_positive_skew {
@@ -197,9 +197,11 @@ impl QuoteGenerator {
         let ask_prices = geomspace(best_ask, best_ask + end, self.total_order);
 
         let (bid_r, ask_r) = if is_positive_skew {
-            (clipped_r, 0.37)
+            // (clipped_r, 0.37)
+            (0.37, 0.37)
         } else {
-            (0.37, clipped_r)
+            // (0.37, clipped_r)
+            (0.37, 0.37)
         };
 
         let max_buy_qty = if self.position_qty != 0.0 {
@@ -236,8 +238,8 @@ impl QuoteGenerator {
                 let size = (bid_size / bid_price).min(post_only_max);
                 orders.push(BatchOrder::new(
                     symbol.to_string(),
-                    round_size(size, book),
                     round_price(book, bid_price),
+                    round_size(size, book),
                     true,
                 ));
             }
@@ -246,8 +248,8 @@ impl QuoteGenerator {
                 let size = (ask_size / ask_price).min(post_only_max);
                 orders.push(BatchOrder::new(
                     symbol.to_string(),
-                    round_size(size, book),
                     round_price(book, ask_price),
+                    round_size(size, book),
                     false,
                 ));
             }
@@ -256,7 +258,8 @@ impl QuoteGenerator {
         orders
     }
 
-    async fn send_batch_orders(&mut self, orders: Vec<BatchOrder>) {
+    async fn send_batch_orders(&mut self, orders: Vec<BatchOrder>) -> bool {
+        let mut result = false;
         for chunk in orders.chunks(ORDER_CHUNK_SIZE) {
             if self.rate_limit == 0 {
                 break;
@@ -265,11 +268,16 @@ impl QuoteGenerator {
             if let Ok((live_buys, live_sells)) = self.client.batch_orders(chunk.to_vec()).await {
                 self.live_buys.extend(live_buys);
                 self.live_sells.extend(live_sells);
-                sort_grid(&mut self.live_buys, -1);
-                sort_grid(&mut self.live_sells, 1);
+                self.live_buys = sort_grid(&mut self.live_buys, -1);
+                self.live_sells = sort_grid(&mut self.live_sells, 1);
+                self.rate_limit -= 1;
+                result = true;
+            } else {
+                self.logger.error("Failed to send batch orders");
                 self.rate_limit -= 1;
             }
         }
+        result
     }
 
     fn check_for_fills(&mut self, info: &BybitPrivate) -> bool {
@@ -366,6 +374,9 @@ impl QuoteGenerator {
                 self.last_update_price = book.mid_price;
                 self.cancel_limit -= 1;
                 return true;
+            } else {
+                self.logger.error("Failed to cancel all orders");
+                self.cancel_limit -= 1;
             }
         }
         false
@@ -389,15 +400,22 @@ impl QuoteGenerator {
         if self.out_of_bounds(&book, &symbol, private).await {
             self.set_inventory_delta(book.get_mid_price());
             if let Ok(orders) = self.generate_quotes(&symbol, &book, skew, volatility) {
-                if self.rate_limit > 0 {
+                if self.rate_limit > 1 {
                     let order_len = orders.len();
 
-                    self.send_batch_orders(orders).await;
+                    // if self.send_batch_orders(orders).await {
                     self.logger.info(&format!(
-                        "Generated {} orders for {} at {} Position: {:#?} Skew: {:.2}",
-                        order_len, symbol, &book.mid_price, self.position_qty, skew
+                        "Generated {} orders for {} at {} Position: {:#?} Skew: {:#?} \n Orders: {:#?}",
+                        order_len,
+                        symbol,
+                        round_price(&book, book.get_mid_price()),
+                        self.position_qty,
+                        skew,
+                        orders
                     ));
+                    // }
                 }
+                self.time_limit = book.last_update;
             }
         }
     }

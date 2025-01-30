@@ -11,7 +11,6 @@ use super::{
 };
 #[derive(Debug, Clone)]
 pub struct Engine {
-    pub timestamp: u64,
     pub bba_imbalance: f64,
     pub deep_imbalance: Vec<f64>,
     pub voi: f64,
@@ -20,6 +19,7 @@ pub struct Engine {
     pub price_impact: f64,
     pub volatility: RollingVolatility,
     pub rate_of_change: ROC,
+    pub avg_trade_price: f64,
     pub mpb: MPB,
     pub skew: f64,
 }
@@ -27,7 +27,6 @@ pub struct Engine {
 impl Engine {
     pub fn new(tick_window: usize) -> Self {
         Self {
-            timestamp: 0,
             bba_imbalance: 0.0,
             deep_imbalance: Vec::new(),
             voi: 0.0,
@@ -36,6 +35,7 @@ impl Engine {
             price_impact: 0.0,
             volatility: RollingVolatility::new(tick_window),
             rate_of_change: ROC::new(tick_window),
+            avg_trade_price: 0.0,
             mpb: MPB::new(tick_window),
             skew: 0.0,
         }
@@ -80,6 +80,13 @@ impl Engine {
     pub fn get_trade_imbalance(&self) -> f64 {
         self.trade_imbalance
     }
+    fn set_avg_trade_price(&mut self, price: f64) {
+        self.avg_trade_price = price;
+    }
+
+    pub fn get_avg_trade_price(&self) -> f64 {
+        self.avg_trade_price
+    }
 
     fn set_price_impact(&mut self, impact: f64) {
         self.price_impact = impact;
@@ -89,12 +96,24 @@ impl Engine {
         self.price_impact
     }
 
+    fn set_volatility(&mut self, price: f64) {
+        self.volatility.update(price);
+    }
+
     pub fn get_volatility(&self) -> f64 {
         self.volatility.clone().current_vol
     }
 
+    fn set_roc(&mut self, price: f64) {
+        self.rate_of_change.update(price);
+    }
+
     pub fn get_rate_of_change(&self) -> ROC {
         self.rate_of_change.clone()
+    }
+
+    fn set_mpb(&mut self, price: f64) {
+        self.mpb.update_basis(price);
     }
 
     pub fn get_mpb(&self) -> MPB {
@@ -105,63 +124,58 @@ impl Engine {
         self.skew
     }
 
-    pub fn update_engine(
+    pub fn update(
         &mut self,
-        current_book: BybitBook,
+        current_book: &BybitBook,
         previous_book: &BybitBook,
         current_trades: &TradeType,
         previous_trades: &TradeType,
         prev_avg_trade_price: f64,
-        depth: Vec<usize>,
+        depth: &[usize],
     ) {
-        if self.timestamp == 0 || (self.timestamp - current_book.last_update) >= 1000 {
-            self.set_bba_imbalance(current_book.imbalance_ratio(None));
+        self.set_bba_imbalance(current_book.imbalance_ratio(None));
 
-            let deep_imbalance = depth[0..]
-                .iter()
-                .map(|x| current_book.imbalance_ratio(Some(*x)))
-                .collect();
+        let deep_imbalance = depth[0..]
+            .iter()
+            .map(|x| current_book.imbalance_ratio(Some(*x)))
+            .collect();
 
-            self.set_deep_imbalance(deep_imbalance);
+        self.set_deep_imbalance(deep_imbalance);
+        let voi = current_book.voi(&previous_book, None);
+        self.set_voi(voi);
 
-            let voi = current_book.voi(&previous_book, None);
+        let ofi = current_book.ofi(&previous_book, None);
+        self.set_ofi(ofi);
 
-            self.set_voi(voi);
+        self.set_trade_imbalance(trade_imbalance(current_trades));
 
-            let ofi = current_book.ofi(&previous_book, None);
+        let impact = current_book.price_impact(&previous_book, None);
+        self.set_price_impact(impact);
 
-            self.set_ofi(ofi);
+        self.set_volatility(current_book.get_mid_price());
 
-            self.set_trade_imbalance(trade_imbalance(current_trades));
+        self.set_roc(rate_of_change(
+            previous_book.get_mid_price(),
+            current_book.get_mid_price(),
+        ));
 
-            let impact = current_book.price_impact(&previous_book, None);
-            self.set_price_impact(impact);
+        let avg_trade_price = avg_trade_price(
+            current_book.get_mid_price(),
+            Some(previous_trades),
+            current_trades,
+            prev_avg_trade_price,
+        );
 
-            self.volatility.update(current_book.get_mid_price());
+        self.set_avg_trade_price(avg_trade_price);
 
-            self.rate_of_change.update(rate_of_change(
-                previous_book.get_mid_price(),
-                current_book.get_mid_price(),
-            ));
-
-            let avg_trade_price = avg_trade_price(
-                current_book.get_mid_price(),
-                Some(previous_trades),
-                current_trades,
-                prev_avg_trade_price,
-            );
-            self.mpb.update_basis(
-                avg_trade_price
-                    - mid_price_avg(previous_book.get_mid_price(), current_book.get_mid_price()),
-            );
-
-            self.timestamp = current_book.last_update;
-
-            self.generate_skew();
-        }
+        self.set_mpb(
+            avg_trade_price
+                - mid_price_avg(previous_book.get_mid_price(), current_book.get_mid_price()),
+        );
+        self.generate_skew();
     }
 
-    pub fn generate_skew(&mut self) {
+    fn generate_skew(&mut self) {
         // 1. Order Flow Signal
         let order_flow = if self.ofi > 0.0 && self.voi > 0.0 {
             1.0 // Strong buying pressure
