@@ -23,10 +23,9 @@ async fn main() {
     } = use_toml().await;
 
     let mut state = ss::SharedState::new("bybit".to_string());
-    let mut symbols_array = Vec::new();
+
     let clients = api_keys;
     for (key, secret, symbol) in clients {
-        symbols_array.push(symbol.clone());
         state.add_clients(symbol, BybitClient::init(key, secret).await);
     }
 
@@ -36,7 +35,6 @@ async fn main() {
     // Initialize the market maker and set the initial state, balance, leverage, orders per side, final order distance, depths, and rate limit
     let mut market_maker = Maker::new(
         state.clone(),
-        symbols_array,
         balance,
         leverage,
         orders_per_side,
