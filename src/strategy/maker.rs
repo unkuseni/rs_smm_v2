@@ -53,31 +53,26 @@ impl Maker {
     }
 
     pub async fn start_loop(&mut self, mut receiver: mpsc::UnboundedReceiver<SharedState>) {
-        let mut send = 0;
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-        let mut latest_market_data = None;
+        let mut last_feature_update = tokio::time::Instant::now();
+        let feature_update_interval = Duration::from_secs(1);
         let depths = self.depths.clone();
 
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if let Some(market_data) = latest_market_data.take() {
-                        self.update_features(market_data, &depths);
-                        send += 1;
-                    }
-                },
-                Some(ss) = receiver.recv() => {
-                    match &ss.markets[0] {
-                        MarketData::Bybit(data) => latest_market_data = Some(data.clone()),
-                        _ => continue,
-                    }
-                    if send > self.tick_window {
-                        if let Some(market_data) = latest_market_data.take() {
-                        self.potentially_update(ss.privates, market_data).await;
-                        }
-                    }
-                }
+        while let Some(ss) = receiver.recv().await {
+            let private = ss.privates;
+            let latest_market_data = match ss.markets.get(0) {
+                Some(MarketData::Bybit(market)) => market.clone(),
+                _ => continue,
+            };
+
+            // Update features every second
+            let now = tokio::time::Instant::now();
+            if now.duration_since(last_feature_update) >= feature_update_interval {
+                self.update_features(latest_market_data.clone(), &depths);
+                last_feature_update = now;
             }
+
+            // Always try to update quotes
+            self.potentially_update(private, latest_market_data).await;
         }
     }
 
@@ -133,39 +128,37 @@ impl Maker {
     }
 
     fn update_features(&mut self, market_data: BybitMarket, depths: &[usize]) {
-        self.current_trades = market_data.trades;
-
-        for (symbol, current_book) in market_data.books {
-            let features = match self.features.get_mut(&symbol) {
-                Some(f) => f,
-                None => continue,
-            };
-
+        for (symbol, current_book) in market_data.books.clone() {
             let (Some(prev_book), Some(prev_trades), Some(curr_trades), Some(prev_avg)) = (
                 self.previous_book.get(&symbol),
                 self.previous_trades.get(&symbol),
-                self.current_trades.get(&symbol),
+                market_data.trades.get(&symbol),
                 self.previous_avg_trade_price.get(&symbol),
             ) else {
                 continue;
             };
 
-            features.update_engine(
-                &current_book,
-                prev_book,
-                curr_trades,
-                prev_trades,
-                *prev_avg,
-                depths,
-            );
-
-            self.previous_book.insert(symbol.clone(), current_book);
-
-            let avg_price = features.get_avg_trade_price();
-            self.previous_avg_trade_price.insert(symbol, avg_price);
+            let features = match self.features.get_mut(&symbol) {
+                Some(f) => {
+                    f.update(
+                        &current_book,
+                        prev_book,
+                        curr_trades,
+                        prev_trades,
+                        *prev_avg,
+                        depths,
+                    );
+                    f
+                }
+                None => continue,
+            };
         }
-
-        self.previous_trades = std::mem::take(&mut self.current_trades);
+        for (symbol, feature) in self.features.iter() {
+            self.previous_avg_trade_price
+                .insert(symbol.clone(), feature.get_avg_trade_price());
+        }
+        self.previous_book = market_data.books;
+        self.previous_trades = market_data.trades;
     }
 
     async fn potentially_update(
@@ -181,10 +174,13 @@ impl Maker {
             ) {
                 let skew = engine.get_skew();
                 let volatility = engine.get_volatility();
-
-                generator
-                    .update_grid(private.clone(), skew, book, symbol, volatility)
-                    .await;
+                println!(
+                    "Updating {:#?} Engine Skew: {}, Volatility: {}",
+                    symbol, skew, volatility
+                );
+                // generator
+                //     .update_grid(private.clone(), skew, book, symbol, volatility)
+                //     .await;
             }
         }
     }
