@@ -78,8 +78,10 @@ pub enum MarketData {
     Binance(BinanceMarket),
 }
 
-#[derive(Debug, Clone)]
-pub enum TradeType {
-    Bybit(VecDeque<WsTrade>),
-    Binance(VecDeque<AggrTradesEvent>),
-}
+// #[derive(Debug, Clone)]
+// pub enum TradeType {
+//     Bybit(VecDeque<WsTrade>),
+//     Binance(VecDeque<AggrTradesEvent>),
+// }
+
+pub type TradeType = VecDeque<WsTrade>;
