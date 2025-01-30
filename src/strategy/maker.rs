@@ -174,17 +174,17 @@ impl Maker {
         data: BybitMarket,
     ) {
         for (symbol, book) in data.books {
-            if let (Some(engine), Some(generator)) =
-                (self.features.get(&symbol), self.generators.get_mut(&symbol))
-            {
+            if let (Some(engine), Some(generator), Some(private)) = (
+                self.features.get(&symbol),
+                self.generators.get_mut(&symbol),
+                private.get(&symbol),
+            ) {
                 let skew = engine.get_skew();
                 let volatility = engine.get_volatility();
-                println!("skew: {}, volatility: {}", skew, volatility);
-                if let Some(private) = private.get(&symbol) {
-                    generator
-                        .update_grid(private.clone(), skew, book, symbol, volatility)
-                        .await;
-                }
+
+                generator
+                    .update_grid(private.clone(), skew, book, symbol, volatility)
+                    .await;
             }
         }
     }
