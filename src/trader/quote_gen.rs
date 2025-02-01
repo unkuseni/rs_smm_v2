@@ -300,16 +300,8 @@ impl QuoteGenerator {
                         .iter()
                         .position(|o| o.order_id == exec.order_id)
                     {
-                        if let Some(pos) = info.positions.back() {
-                            if pos.symbol == symbol {
-                                self.position_qty = pos
-                                    .size
-                                    .parse()
-                                    .unwrap_or(self.position_qty + self.live_buys[idx].qty);
-                            }
-                        } else {
-                            self.position_qty += self.live_buys[idx].qty;
-                        }
+                        self.position_qty += self.live_buys[idx].qty;
+
                         let msg = format!(
                             "Buy fill: {:.2} @ {:#?} Current position: {:.2}",
                             self.live_buys[idx].qty, self.live_buys[idx].price, self.position_qty
@@ -325,17 +317,7 @@ impl QuoteGenerator {
                         .iter()
                         .position(|o| o.order_id == exec.order_id)
                     {
-                        if let Some(pos) = info.positions.back() {
-                            if pos.symbol == symbol {
-                                self.position_qty = pos
-                                    .size
-                                    .parse()
-                                    .unwrap_or(self.position_qty - self.live_sells[idx].qty);
-                            }
-                        } else {
-                            self.position_qty -= self.live_sells[idx].qty;
-                        }
-
+                        self.position_qty -= self.live_sells[idx].qty;
                         let msg = format!(
                             "Sell fill: {:.2} @ {:#?} Current position: {:.2}",
                             self.live_sells[idx].qty, self.live_sells[idx].price, self.position_qty
