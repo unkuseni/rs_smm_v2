@@ -174,13 +174,10 @@ impl Maker {
             ) {
                 let skew = engine.get_skew();
                 let volatility = engine.get_volatility();
-                println!(
-                    "Updating {:#?} Engine Skew: {}, Volatility: {}",
-                    symbol, skew, volatility
-                );
-                // generator
-                //     .update_grid(private.clone(), skew, book, symbol, volatility)
-                //     .await;
+
+                generator
+                    .update_grid(private.clone(), skew, book, symbol, volatility)
+                    .await;
             }
         }
     }
