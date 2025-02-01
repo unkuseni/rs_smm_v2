@@ -144,7 +144,7 @@ impl Maker {
                 continue;
             };
 
-            let features = match self.features.get_mut(&symbol) {
+            match self.features.get_mut(&symbol) {
                 Some(f) => {
                     f.update(
                         &current_book,
