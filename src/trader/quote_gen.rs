@@ -150,7 +150,6 @@ impl QuoteGenerator {
         volatility: f64,
     ) -> Result<Vec<BatchOrder>> {
         let spread = self.vol_adjusted_spread(book, volatility);
-        let half_spread = spread / 2.0;
 
         let inventory_factor = nbsqrt(self.inventory_delta)?;
         let skew_factor = skew * (1.0 - inventory_factor.abs());
@@ -160,7 +159,6 @@ impl QuoteGenerator {
         let is_positive_skew = combined_skew >= 0.0;
         let orders = self.generate_skew_orders(
             symbol,
-            half_spread,
             spread,
             skew.abs(),
             book,
@@ -173,7 +171,6 @@ impl QuoteGenerator {
     fn generate_skew_orders(
         &self,
         symbol: &str,
-        half_spread: f64,
         spread: f64,
         skew: f64,
         book: &BybitBook,
@@ -185,10 +182,10 @@ impl QuoteGenerator {
         let post_only_max = book.post_only_max;
 
         let (best_bid, best_ask) = if is_positive_skew {
-            let bid = mid_price - (half_spread * (1.0 - skew.sqrt()));
+            let bid = mid_price - (spread * (1.0 - skew.sqrt()));
             (bid, bid + spread)
         } else {
-            let ask = mid_price + (half_spread * (1.0 - skew.sqrt()));
+            let ask = mid_price + (spread * (1.0 - skew.sqrt()));
             (ask - spread, ask)
         };
 
