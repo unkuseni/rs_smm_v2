@@ -204,12 +204,12 @@ impl Engine {
         };
 
         // 5. Momentum-adjusted weighting factors
-        let momentum_factor = if self.rate_of_change.std_dev() == 0.0 {
-            1.0 // Fallback to neutral momentum if no data
-        } else {
-            self.rate_of_change.z_score().tanh().abs()
-        };
-        let volatility_factor = 1.0 / (self.volatility.current_vol.max(0.001));
+        // let momentum_factor = if self.rate_of_change.std_dev() == 0.0 {
+        //     1.0 // Fallback to neutral momentum if no data
+        // } else {
+        //     self.rate_of_change.z_score().tanh().abs()
+        // };
+        // let volatility_factor = 1.0 / (self.volatility.current_vol.max(0.001));
 
         // 6. Composite skew calculation with order flow
         let raw_skew = 0.3 * trade_skew
@@ -219,9 +219,7 @@ impl Engine {
             + 0.1 * order_flow;
 
         // 7. Apply momentum and volatility scaling
-        self.skew = (raw_skew * momentum_factor * volatility_factor)
-            .tanh() // Ensure final value stays in [-1, 1]
-            .clamp(-1.0, 1.0);
+        self.skew = raw_skew
     }
 }
 
