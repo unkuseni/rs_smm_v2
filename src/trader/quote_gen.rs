@@ -301,6 +301,14 @@ impl QuoteGenerator {
                         .position(|o| o.order_id == exec.order_id)
                     {
                         self.position_qty += self.live_buys[idx].qty;
+                        if let Some(pos) = info.positions.iter().last() {
+                            self.position_qty = pos
+                                .size
+                                .parse()
+                                .unwrap_or(self.position_qty + self.live_buys[idx].qty);
+                        } else {
+                            self.position_qty += self.live_buys[idx].qty;
+                        }
                         let msg = format!(
                             "Buy fill: {:.2} @ {:#?}",
                             self.live_buys[idx].qty, self.live_buys[idx].price
@@ -316,7 +324,14 @@ impl QuoteGenerator {
                         .iter()
                         .position(|o| o.order_id == exec.order_id)
                     {
-                        self.position_qty -= self.live_sells[idx].qty;
+                        if let Some(pos) = info.positions.iter().last() {
+                            self.position_qty = pos
+                                .size
+                                .parse()
+                                .unwrap_or(self.position_qty - self.live_sells[idx].qty);
+                        } else {
+                            self.position_qty -= self.live_sells[idx].qty;
+                        }
                         let msg = format!(
                             "Sell fill: {:.2} @ {:#?}",
                             self.live_sells[idx].qty, self.live_sells[idx].price
@@ -354,7 +369,7 @@ impl QuoteGenerator {
             return true;
         }
 
-        let bounds = self.bounds;
+        let bounds = self.bounds * 1.5;
         let current_bid_bound = self.last_update_price - bounds;
         let current_ask_bound = self.last_update_price + bounds;
 
@@ -363,8 +378,7 @@ impl QuoteGenerator {
         let fill_detected = self.check_for_fills(&private);
         self.set_inventory_delta(book.get_mid_price());
 
-        if (bounds_violated || stale_data) && self.cancel_limit > MIN_CANCEL_LIMIT
-        {
+        if (bounds_violated || stale_data) && self.cancel_limit > MIN_CANCEL_LIMIT {
             if let Ok(cancelled) = self.client.cancel_all(symbol).await {
                 let cancelled_ids: HashSet<_> = cancelled.iter().map(|o| &o.order_id).collect();
                 self.live_buys
