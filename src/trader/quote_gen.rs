@@ -157,13 +157,7 @@ impl QuoteGenerator {
             (skew_factor + INVENTORY_ADJUSTMENT * inventory_factor).clamp(-1.0, 1.0);
 
         let is_positive_skew = combined_skew >= 0.0;
-        let orders = self.generate_skew_orders(
-            symbol,
-            spread,
-            skew.abs(),
-            book,
-            is_positive_skew,
-        );
+        let orders = self.generate_skew_orders(symbol, spread, skew.abs(), book, is_positive_skew);
 
         Ok(orders)
     }
@@ -277,8 +271,7 @@ impl QuoteGenerator {
         result
     }
 
-    fn check_for_fills(&mut self, info: &BybitPrivate) -> bool {
-        let mut fill_occurred = false;
+    fn check_for_fills(&mut self, info: &BybitPrivate) {
         let mut buy_indices = Vec::new();
         let mut sell_indices = Vec::new();
 
@@ -298,8 +291,12 @@ impl QuoteGenerator {
                         .position(|o| o.order_id == exec.order_id)
                     {
                         self.position_qty += self.live_buys[idx].qty;
+                        let msg = format!(
+                            "Buy fill: {:.2} @ {}",
+                            self.live_buys[idx].qty, self.live_buys[idx].price
+                        );
+                        self.logger.info(&msg);
                         buy_indices.push(idx);
-                        fill_occurred = true;
                     }
                 }
                 "Sell" => {
@@ -309,8 +306,12 @@ impl QuoteGenerator {
                         .position(|o| o.order_id == exec.order_id)
                     {
                         self.position_qty -= self.live_sells[idx].qty;
+                        let msg = format!(
+                            "Sell fill: {:.2} @ {}",
+                            self.live_sells[idx].qty, self.live_sells[idx].price
+                        );
+                        self.logger.info(&msg);
                         sell_indices.push(idx);
-                        fill_occurred = true;
                     }
                 }
                 _ => (),
@@ -326,8 +327,6 @@ impl QuoteGenerator {
         for idx in sell_indices {
             self.live_sells.remove(idx);
         }
-
-        fill_occurred
     }
 
     async fn out_of_bounds(
@@ -347,12 +346,7 @@ impl QuoteGenerator {
 
         let bounds_violated = !(current_bid_bound..=current_ask_bound).contains(&book.mid_price);
         let stale_data = (book.last_update - self.time_limit) > (self.tick_window * 1000) as u64;
-        let fill_detected = self.check_for_fills(&private);
-        if fill_detected {
-            let bybit_pos = private.positions.back().take();
-            self.logger
-                .info(&format!("Position: {:#?} Exchange Position: {:#?}", self.position_qty, bybit_pos));
-        }
+        self.check_for_fills(&private);
         self.set_inventory_delta(book.get_mid_price());
 
         if (bounds_violated || stale_data) && self.cancel_limit > MIN_CANCEL_LIMIT {
