@@ -302,7 +302,7 @@ impl QuoteGenerator {
                     {
                         self.position_qty += self.live_buys[idx].qty;
                         let msg = format!(
-                            "Buy fill: {:.2} @ {:.2}",
+                            "Buy fill: {:.2} @ {:#?}",
                             self.live_buys[idx].qty, self.live_buys[idx].price
                         );
                         self.logger.info(&msg);
@@ -318,7 +318,7 @@ impl QuoteGenerator {
                     {
                         self.position_qty -= self.live_sells[idx].qty;
                         let msg = format!(
-                            "Sell fill: {:.2} @ {:.2}",
+                            "Sell fill: {:.2} @ {:#?}",
                             self.live_sells[idx].qty, self.live_sells[idx].price
                         );
                         self.logger.info(&msg);
