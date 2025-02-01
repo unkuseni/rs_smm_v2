@@ -14,7 +14,7 @@ type Result<T> = std::result::Result<T, f64>;
 
 // Named constants for magic numbers
 const SAFETY_FACTOR: f64 = 0.95;
-const DEFAULT_BPS: f64 = 25.0;
+const DEFAULT_BPS: f64 = 6.0;
 const VOLATILITY_MULTIPLIER: f64 = 100.0;
 const MAX_SPREAD_MULTIPLIER: f64 = 3.7;
 const INVENTORY_ADJUSTMENT: f64 = -0.63;
@@ -98,7 +98,7 @@ impl QuoteGenerator {
         book: &BybitBook,
         volatility: f64,
     ) -> f64 {
-        let volatility_multiplier = 1.0 + (volatility * VOLATILITY_MULTIPLIER);
+        let volatility_multiplier = (volatility * VOLATILITY_MULTIPLIER) / book.get_mid_price();
         let min_value = base_value * volatility_multiplier;
         let max_value = min_value * MAX_SPREAD_MULTIPLIER * volatility_multiplier;
         book.get_spread().clip(min_value, max_value)
@@ -369,7 +369,7 @@ impl QuoteGenerator {
             return true;
         }
 
-        let bounds = self.bounds * 1.5;
+        let bounds = self.bounds;
         let current_bid_bound = self.last_update_price - bounds;
         let current_ask_bound = self.last_update_price + bounds;
 
