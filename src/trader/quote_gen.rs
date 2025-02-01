@@ -15,7 +15,7 @@ type Result<T> = std::result::Result<T, f64>;
 // Named constants for magic numbers
 const SAFETY_FACTOR: f64 = 0.95;
 const DEFAULT_BPS: f64 = 25.0;
-const VOLATILITY_MULTIPLIER: f64 = 10.0;
+const VOLATILITY_MULTIPLIER: f64 = 100.0;
 const MAX_SPREAD_MULTIPLIER: f64 = 3.7;
 const INVENTORY_ADJUSTMENT: f64 = -0.63;
 
@@ -403,17 +403,16 @@ impl QuoteGenerator {
                 if self.rate_limit > 1 {
                     let order_len = orders.len();
 
-                    // if self.send_batch_orders(orders).await {
-                    self.logger.info(&format!(
-                        "Generated {} orders for {} at {} Position: {:#?} Skew: {:#?} \n Orders: {:#?}",
-                        order_len,
-                        symbol,
-                        round_price(&book, book.get_mid_price()),
-                        self.position_qty,
-                        skew,
-                        orders
-                    ));
-                    // }
+                    if self.send_batch_orders(orders).await {
+                        self.logger.info(&format!(
+                            "Generated {} orders for {} at {} Position: {:#?} Skew: {:#?}",
+                            order_len,
+                            symbol,
+                            round_price(&book, book.get_mid_price()),
+                            self.position_qty,
+                            skew,
+                        ));
+                    }
                 }
                 self.time_limit = book.last_update;
             }
