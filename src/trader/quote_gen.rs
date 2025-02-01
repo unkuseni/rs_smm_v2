@@ -363,7 +363,7 @@ impl QuoteGenerator {
         let fill_detected = self.check_for_fills(&private);
         self.set_inventory_delta(book.get_mid_price());
 
-        if (bounds_violated || fill_detected || stale_data) && self.cancel_limit > MIN_CANCEL_LIMIT
+        if (bounds_violated || stale_data) && self.cancel_limit > MIN_CANCEL_LIMIT
         {
             if let Ok(cancelled) = self.client.cancel_all(symbol).await {
                 let cancelled_ids: HashSet<_> = cancelled.iter().map(|o| &o.order_id).collect();
