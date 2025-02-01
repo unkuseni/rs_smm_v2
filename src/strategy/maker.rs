@@ -53,6 +53,7 @@ impl Maker {
     }
 
     pub async fn start_loop(&mut self, mut receiver: mpsc::UnboundedReceiver<SharedState>) {
+        let mut send_orders = 0;
         let mut last_feature_update = tokio::time::Instant::now();
         let feature_update_interval = Duration::from_secs(1);
         let depths = self.depths.clone();
@@ -68,11 +69,16 @@ impl Maker {
             let now = tokio::time::Instant::now();
             if now.duration_since(last_feature_update) >= feature_update_interval {
                 self.update_features(latest_market_data.clone(), &depths);
+                if send_orders <= self.tick_window {
+                    send_orders += 1;
+                }
                 last_feature_update = now;
             }
 
             // Always try to update quotes
-            self.potentially_update(private, latest_market_data).await;
+            if send_orders > self.tick_window {
+                self.potentially_update(private, latest_market_data).await;
+            }
         }
     }
 
