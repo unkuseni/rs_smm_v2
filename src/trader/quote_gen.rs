@@ -101,7 +101,7 @@ impl QuoteGenerator {
         book: &BybitBook,
         volatility: f64,
     ) -> f64 {
-        let volatility_multiplier = 1.0 + self.vol_price_spread(volatility);
+        let volatility_multiplier = 1.0 + (self.vol_price_spread(volatility) * 0.095);
         let min_value = base_value * volatility_multiplier;
         let max_value = min_value * MAX_SPREAD_MULTIPLIER * volatility_multiplier;
         book.get_spread().clip(min_value, max_value)
@@ -127,18 +127,18 @@ impl QuoteGenerator {
         self.bounds
     }
 
-    fn _order_refresh_time(&self, volatility: f64) -> f64 {
-        let window_seconds = self.tick_window as f64;
-        if window_seconds < f64::EPSILON || volatility < f64::EPSILON {
+    fn order_refresh_time(&self, volatility: f64, mid_price: f64) -> f64 {
+        let spread_decimal = self.adjusted_spread / mid_price;
+        if volatility < f64::EPSILON {
             return f64::INFINITY;
         }
 
-        let per_second_vol = volatility / window_seconds.sqrt();
+        let per_second_vol = volatility;
         if per_second_vol < f64::EPSILON {
             return f64::INFINITY;
         }
 
-        let ratio = self.adjusted_spread / (2.0 * per_second_vol);
+        let ratio = spread_decimal / (2.0 * per_second_vol);
         ratio.powf(2.0)
     }
 
@@ -290,13 +290,17 @@ impl QuoteGenerator {
                         .iter()
                         .position(|o| o.order_id == exec.order_id)
                     {
-                        self.position_qty += self.live_buys[idx].qty;
-                        let msg = format!(
-                            "Buy fill: {:.2} @ {}",
-                            self.live_buys[idx].qty, self.live_buys[idx].price
-                        );
+                        // Update position with executed qty
+                        self.position_qty += qty;
+                        // Update the order's remaining quantity
+                        self.live_buys[idx].qty -= qty;
+                        // Log the executed qty
+                        let msg = format!("Buy fill: {:.2} @ {}", qty, self.live_buys[idx].price);
                         self.logger.info(&msg);
-                        buy_indices.push(idx);
+                        // Mark for removal only if fully filled
+                        if self.live_buys[idx].qty <= f64::EPSILON {
+                            buy_indices.push(idx);
+                        }
                     }
                 }
                 "Sell" => {
@@ -305,19 +309,24 @@ impl QuoteGenerator {
                         .iter()
                         .position(|o| o.order_id == exec.order_id)
                     {
-                        self.position_qty -= self.live_sells[idx].qty;
-                        let msg = format!(
-                            "Sell fill: {:.2} @ {}",
-                            self.live_sells[idx].qty, self.live_sells[idx].price
-                        );
+                        // Update position with executed qty
+                        self.position_qty -= qty;
+                        // Update the order's remaining quantity
+                        self.live_sells[idx].qty -= qty;
+                        // Log the executed qty
+                        let msg = format!("Sell fill: {:.2} @ {}", qty, self.live_sells[idx].price);
                         self.logger.info(&msg);
-                        sell_indices.push(idx);
+                        // Mark for removal only if fully filled
+                        if self.live_sells[idx].qty <= f64::EPSILON {
+                            sell_indices.push(idx);
+                        }
                     }
                 }
                 _ => (),
             }
         }
 
+        // Remove fully filled orders (backwards to preserve indices)
         buy_indices.sort_unstable_by(|a, b| b.cmp(a));
         for idx in buy_indices {
             self.live_buys.remove(idx);
@@ -334,6 +343,7 @@ impl QuoteGenerator {
         book: &BybitBook,
         symbol: &str,
         private: BybitPrivate,
+        volatility: f64,
     ) -> bool {
         if self.live_buys.is_empty() && self.live_sells.is_empty() {
             self.last_update_price = book.mid_price;
@@ -345,7 +355,10 @@ impl QuoteGenerator {
         let current_ask_bound = self.last_update_price + bounds;
 
         let bounds_violated = !(current_bid_bound..=current_ask_bound).contains(&book.mid_price);
-        let stale_data = (book.last_update - self.time_limit) > (self.tick_window * 1000) as u64;
+        let stale_data = (book.last_update - self.time_limit)
+            > ((self.order_refresh_time(volatility, book.mid_price) as u64)
+                .min(self.tick_window as u64)
+                * 1000);
         self.check_for_fills(&private);
         self.set_inventory_delta(book.get_mid_price());
 
@@ -382,7 +395,10 @@ impl QuoteGenerator {
             self.cancel_limit = self.initial_limit;
         }
 
-        if self.out_of_bounds(&book, &symbol, private).await {
+        if self
+            .out_of_bounds(&book, &symbol, private, volatility)
+            .await
+        {
             self.set_inventory_delta(book.get_mid_price());
             if let Ok(orders) = self.generate_quotes(&symbol, &book, skew, volatility) {
                 if self.rate_limit > 1 {
