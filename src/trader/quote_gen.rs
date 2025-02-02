@@ -120,8 +120,11 @@ impl QuoteGenerator {
     }
 
     fn vol_adjusted_bounds(&mut self, book: &BybitBook, volatility: f64) -> f64 {
-        let base_min_spread =
-            bps_to_decimal(self.vol_price_spread(volatility) * 100.0) * self.last_update_price;
+        let base_min_spread = bps_to_decimal(if self.minimum_spread.abs() < f64::EPSILON {
+            self.vol_price_spread(volatility) * 100.0
+        } else {
+            self.minimum_spread
+        }) * self.last_update_price;
 
         self.bounds = self.calculate_vol_adjusted_value(base_min_spread, book, volatility);
         self.bounds
