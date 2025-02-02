@@ -343,7 +343,6 @@ impl QuoteGenerator {
         book: &BybitBook,
         symbol: &str,
         private: BybitPrivate,
-        volatility: f64,
     ) -> bool {
         if self.live_buys.is_empty() && self.live_sells.is_empty() {
             self.last_update_price = book.mid_price;
@@ -355,10 +354,7 @@ impl QuoteGenerator {
         let current_ask_bound = self.last_update_price + bounds;
 
         let bounds_violated = !(current_bid_bound..=current_ask_bound).contains(&book.mid_price);
-        let stale_data = (book.last_update - self.time_limit)
-            > ((self.order_refresh_time(volatility, book.mid_price) as u64)
-                .min(self.tick_window as u64)
-                * 1000);
+        let stale_data = (book.last_update - self.time_limit) > (self.tick_window as u64 * 1000);
         self.check_for_fills(&private);
         self.set_inventory_delta(book.get_mid_price());
 
@@ -395,10 +391,7 @@ impl QuoteGenerator {
             self.cancel_limit = self.initial_limit;
         }
 
-        if self
-            .out_of_bounds(&book, &symbol, private, volatility)
-            .await
-        {
+        if self.out_of_bounds(&book, &symbol, private).await {
             self.set_inventory_delta(book.get_mid_price());
             if let Ok(orders) = self.generate_quotes(&symbol, &book, skew, volatility) {
                 if self.rate_limit > 1 {
