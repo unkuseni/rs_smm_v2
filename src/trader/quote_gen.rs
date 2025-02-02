@@ -91,14 +91,17 @@ impl QuoteGenerator {
         };
     }
 
+    fn vol_price_spread(&mut self, volatility: f64) -> f64 {
+        volatility * VOLATILITY_MULTIPLIER * (self.tick_window as f64).sqrt() * 0.8
+    }
+
     fn calculate_vol_adjusted_value(
         &mut self,
         base_value: f64,
         book: &BybitBook,
         volatility: f64,
     ) -> f64 {
-        let volatility_multiplier =
-            1.0 + (volatility * VOLATILITY_MULTIPLIER * (self.tick_window as f64).sqrt());
+        let volatility_multiplier = 1.0 + self.vol_price_spread(volatility);
         let min_value = base_value * volatility_multiplier;
         let max_value = min_value * MAX_SPREAD_MULTIPLIER * volatility_multiplier;
         book.get_spread().clip(min_value, max_value)
@@ -107,7 +110,7 @@ impl QuoteGenerator {
     fn vol_adjusted_spread(&mut self, book: &BybitBook, volatility: f64) -> f64 {
         let mid_price = book.get_mid_price();
         let base_min_spread = bps_to_decimal(if self.minimum_spread.abs() < f64::EPSILON {
-            volatility * VOLATILITY_MULTIPLIER * (self.tick_window as f64).sqrt()
+            self.vol_price_spread(volatility) * 100.0
         } else {
             self.minimum_spread
         }) * mid_price;
@@ -117,11 +120,8 @@ impl QuoteGenerator {
     }
 
     fn vol_adjusted_bounds(&mut self, book: &BybitBook, volatility: f64) -> f64 {
-        let base_min_spread = bps_to_decimal(if self.minimum_spread.abs() < f64::EPSILON {
-            volatility * VOLATILITY_MULTIPLIER * (self.tick_window as f64).sqrt()
-        } else {
-            self.minimum_spread
-        }) * self.last_update_price;
+        let base_min_spread =
+            bps_to_decimal(self.vol_price_spread(volatility) * 100.0) * self.last_update_price;
 
         self.bounds = self.calculate_vol_adjusted_value(base_min_spread, book, volatility);
         self.bounds
