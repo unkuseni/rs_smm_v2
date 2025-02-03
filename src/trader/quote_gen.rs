@@ -14,6 +14,7 @@ type Result<T> = std::result::Result<T, f64>;
 
 // Named constants for magic numbers
 const SAFETY_FACTOR: f64 = 0.95;
+const DEFAULT_BPS: f64 = 25.0;
 const VOLATILITY_MULTIPLIER: f64 = 100.0;
 const MAX_SPREAD_MULTIPLIER: f64 = 3.7;
 const INVENTORY_ADJUSTMENT: f64 = -0.63;
@@ -91,17 +92,13 @@ impl QuoteGenerator {
         };
     }
 
-    fn vol_price_spread(&mut self, volatility: f64) -> f64 {
-        volatility * VOLATILITY_MULTIPLIER * (self.tick_window as f64).sqrt() * 0.8
-    }
-
     fn calculate_vol_adjusted_value(
         &mut self,
         base_value: f64,
         book: &BybitBook,
         volatility: f64,
     ) -> f64 {
-        let volatility_multiplier = 1.0 + (self.vol_price_spread(volatility) * 0.095);
+        let volatility_multiplier = 1.0 + (volatility * VOLATILITY_MULTIPLIER);
         let min_value = base_value * volatility_multiplier;
         let max_value = min_value * MAX_SPREAD_MULTIPLIER * volatility_multiplier;
         book.get_spread().clip(min_value, max_value)
@@ -110,7 +107,7 @@ impl QuoteGenerator {
     fn vol_adjusted_spread(&mut self, book: &BybitBook, volatility: f64) -> f64 {
         let mid_price = book.get_mid_price();
         let base_min_spread = bps_to_decimal(if self.minimum_spread.abs() < f64::EPSILON {
-            self.vol_price_spread(volatility) * 100.0
+            DEFAULT_BPS
         } else {
             self.minimum_spread
         }) * mid_price;
@@ -121,7 +118,7 @@ impl QuoteGenerator {
 
     fn vol_adjusted_bounds(&mut self, book: &BybitBook, volatility: f64) -> f64 {
         let base_min_spread = bps_to_decimal(if self.minimum_spread.abs() < f64::EPSILON {
-            self.vol_price_spread(volatility) * 100.0
+            DEFAULT_BPS
         } else {
             self.minimum_spread
         }) * self.last_update_price;
